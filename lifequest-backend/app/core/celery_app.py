@@ -1,3 +1,5 @@
+"""конфигурация Celery — брокер задач на базе Redis."""
+
 import os
 from celery import Celery
 
@@ -17,5 +19,5 @@ celery_app.conf.update(
     enable_utc=True,
 )
 
-# Auto-discover tasks from app.tasks module (when created)
+# автоматическое обнаружение задач из модуля app.tasks (когда будет создан)
 # celery_app.autodiscover_tasks(["app.tasks"])
