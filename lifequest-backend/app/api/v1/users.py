@@ -1,115 +1,115 @@
 """
-Mock-эндпоинты пользователей.
-Возвращают захардкоженные данные, чтобы фронтенд мог начать интеграцию сразу.
+Эндпоинты пользователей.
+Реализована безопасная регистрация и работа с профилем через JWT-токен.
 """
 
-import uuid
-from datetime import datetime, timezone
+from fastapi import APIRouter, Depends, HTTPException, Response, status
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from fastapi import APIRouter, HTTPException, Response, status
-
+from app.core.database import get_async_session
+from app.core.security import get_password_hash
+from app.models.user import User
 from app.schemas.user import UserCreate, UserRead, UserUpdate, UserProfile
+from app.api.dependencies import get_current_user
 
 router = APIRouter()
-
-# ── тестовые данные ──────────────────────────────────────────
-
-_MOCK_USER_ID = uuid.UUID("a1b2c3d4-e5f6-7890-abcd-ef1234567890")
-_MOCK_NOW = datetime(2026, 3, 5, 12, 0, 0, tzinfo=timezone.utc)
-
-_MOCK_USER = UserRead(
-    id=_MOCK_USER_ID,
-    username="hero_knight",
-    email="hero@lifequest.app",
-    display_name="Фаррикс",
-    level=2,
-    experience_points=135,
-    coins=42,
-    rank_title="Путешественник",
-    is_active=True,
-    created_at=_MOCK_NOW,
-)
-
-_MOCK_PROFILE = UserProfile(
-    **_MOCK_USER.model_dump(),
-    avatar_url="https://api.lifequest.app/avatars/hero_knight.png",
-    quests_completed=12,
-    achievements_count=3,
-    current_streak=5,
-)
-
-
-# ── эндпоинты ───────────────────────────────────────────────
 
 @router.post(
     "/",
     response_model=UserRead,
     status_code=status.HTTP_201_CREATED,
     summary="Регистрация нового пользователя",
-    description="Создаёт аккаунт игрока и возвращает его данные.",
+    description="Создаёт аккаунт игрока с хешированием пароля и сохраняет в БД."
 )
-async def create_user(body: UserCreate) -> UserRead:
-    """mock: игнорирует тело, возвращает захардкоженного пользователя."""
-    return _MOCK_USER
+async def create_user(
+    body: UserCreate, 
+    session: AsyncSession = Depends(get_async_session)
+) -> UserRead:
+    # Проверка уникальности логина и email
+    query = select(User).where((User.username == body.username) | (User.email == body.email))
+    result = await session.execute(query)
+    if result.scalars().first():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, 
+            detail="Пользователь с таким логином или email уже существует"
+        )
+    
+    # Создание пользователя
+    new_user = User(
+        username=body.username,
+        email=body.email,
+        hashed_password=get_password_hash(body.password),
+        display_name=body.display_name
+    )
+    session.add(new_user)
+    await session.commit()
+    await session.refresh(new_user)
+    
+    return new_user
 
 
 @router.get(
-    "/",
-    response_model=list,
-    summary="Список пользователей",
-    description="Возвращает постраничный список пользователей (mock: один пользователь).",
-)
-async def list_users(page: int = 1, size: int = 20):
-    return [_MOCK_USER]
-
-
-@router.get(
-    "/{user_id}",
-    response_model=UserRead,
-    summary="Получить пользователя по ID",
-    description="Возвращает данные пользователя по его UUID.",
-)
-async def get_user(user_id: uuid.UUID) -> UserRead:
-    if user_id != _MOCK_USER_ID:
-        raise HTTPException(status_code=404, detail="Пользователь не найден")
-    return _MOCK_USER
-
-
-@router.get(
-    "/{user_id}/profile",
+    "/me",
     response_model=UserProfile,
-    summary="Профиль героя",
-    description="Расширенный профиль с RPG-статистикой для экрана «Профиль».",
+    summary="Профиль героя (Мой)",
+    description="Возвращает расширенный профиль текущего авторизованного пользователя."
 )
-async def get_user_profile(user_id: uuid.UUID) -> UserProfile:
-    if user_id != _MOCK_USER_ID:
-        raise HTTPException(status_code=404, detail="Пользователь не найден")
-    return _MOCK_PROFILE
+async def get_my_profile(current_user: User = Depends(get_current_user)) -> UserProfile:
+    # Возвращаем профиль на основе текущего пользователя из JWT
+    # Примечание: quests_completed и achievements_count пока нули (добавятся агрегации в V2)
+    return UserProfile(
+        id=current_user.id,
+        username=current_user.username,
+        email=current_user.email,
+        display_name=current_user.display_name,
+        level=current_user.level,
+        experience_points=current_user.experience_points,
+        coins=current_user.coins,
+        rank_title=current_user.rank_title,
+        is_active=current_user.is_active,
+        created_at=current_user.created_at,
+        avatar_url=current_user.avatar_url,
+        quests_completed=0,
+        achievements_count=0,
+        current_streak=current_user.current_streak,
+    )
 
 
 @router.patch(
-    "/{user_id}",
+    "/me",
     response_model=UserRead,
-    summary="Обновить профиль",
-    description="Частичное обновление данных пользователя.",
+    summary="Обновить свой профиль",
+    description="Частичное обновление данных авторизованного пользователя."
 )
-async def update_user(user_id: uuid.UUID, body: UserUpdate) -> UserRead:
-    if user_id != _MOCK_USER_ID:
-        raise HTTPException(status_code=404, detail="Пользователь не найден")
-    data = _MOCK_USER.model_dump()
-    update = body.model_dump(exclude_unset=True)
-    data.update(update)
-    return UserRead(**data)
+async def update_my_profile(
+    body: UserUpdate,
+    session: AsyncSession = Depends(get_async_session),
+    current_user: User = Depends(get_current_user)
+) -> UserRead:
+    
+    update_data = body.model_dump(exclude_unset=True)
+    for key, value in update_data.items():
+        setattr(current_user, key, value)
+        
+    session.add(current_user)
+    await session.commit()
+    await session.refresh(current_user)
+    
+    return current_user
 
 
 @router.delete(
-    "/{user_id}",
+    "/me",
     status_code=status.HTTP_204_NO_CONTENT,
-    summary="Удалить аккаунт",
-    description="Удаляет пользователя и все связанные данные.",
+    summary="Удалить свой аккаунт",
+    description="Удаляет текущего пользователя и все его данные.",
     response_class=Response,
 )
-async def delete_user(user_id: uuid.UUID):
-    if user_id != _MOCK_USER_ID:
-        raise HTTPException(status_code=404, detail="Пользователь не найден")
+async def delete_my_account(
+    session: AsyncSession = Depends(get_async_session),
+    current_user: User = Depends(get_current_user)
+):
+    await session.delete(current_user)
+    await session.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)

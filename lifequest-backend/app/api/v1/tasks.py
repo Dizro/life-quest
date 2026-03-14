@@ -1,128 +1,62 @@
 """
-Mock-эндпоинты квестов (задач).
-Возвращают захардкоженные данные, чтобы фронтенд мог начать интеграцию сразу.
+Эндпоинты квестов (задач).
+Все операции строго привязаны к текущему авторизованному пользователю.
 """
 
 import uuid
-from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Query, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from sqlalchemy import select, func
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.database import get_async_session
+from app.models.task import Task
+from app.models.user import User
 from app.schemas.task import (
-    TaskCreate,
-    TaskRead,
-    TaskUpdate,
-    TaskComplete,
-    TaskListResponse,
-    TaskStatusEnum,
-    TaskPriorityEnum,
-    TaskCategoryEnum,
-    TaskRecurrenceEnum,
+    TaskCreate, TaskRead, TaskUpdate, TaskComplete, TaskListResponse,
+    TaskStatusEnum, TaskCategoryEnum
 )
+from app.api.dependencies import get_current_user
 
 router = APIRouter()
-
-# ── тестовые данные ──────────────────────────────────────────
-
-_MOCK_USER_ID = uuid.UUID("a1b2c3d4-e5f6-7890-abcd-ef1234567890")
-_NOW = datetime(2026, 3, 5, 12, 0, 0, tzinfo=timezone.utc)
-
-_MOCK_TASKS: list = [
-    TaskRead(
-        id=uuid.UUID("11111111-1111-1111-1111-111111111111"),
-        owner_id=_MOCK_USER_ID,
-        title="Утренняя медитация",
-        description="15 минут осознанного дыхания перед завтраком",
-        status=TaskStatusEnum.COMPLETED,
-        priority=TaskPriorityEnum.COMMON,
-        category=TaskCategoryEnum.HEALTH,
-        recurrence=TaskRecurrenceEnum.DAILY,
-        xp_reward=10,
-        coin_reward=1,
-        due_date=None,
-        completed_at=_NOW,
-        created_at=_NOW,
-        updated_at=_NOW,
-    ),
-    TaskRead(
-        id=uuid.UUID("22222222-2222-2222-2222-222222222222"),
-        owner_id=_MOCK_USER_ID,
-        title="Закончить отчёт по проекту",
-        description="Подготовить финальный отчёт и отправить руководителю",
-        status=TaskStatusEnum.ACTIVE,
-        priority=TaskPriorityEnum.RARE,
-        category=TaskCategoryEnum.WORK,
-        recurrence=TaskRecurrenceEnum.NONE,
-        xp_reward=50,
-        coin_reward=5,
-        due_date=datetime(2026, 3, 10, 23, 59, 59, tzinfo=timezone.utc),
-        completed_at=None,
-        created_at=_NOW,
-        updated_at=_NOW,
-    ),
-    TaskRead(
-        id=uuid.UUID("33333333-3333-3333-3333-333333333333"),
-        owner_id=_MOCK_USER_ID,
-        title="Освоить систему дизайна",
-        description="Изучить Figma-токены и компоненты UI-кита",
-        status=TaskStatusEnum.ACTIVE,
-        priority=TaskPriorityEnum.EPIC,
-        category=TaskCategoryEnum.STUDY,
-        recurrence=TaskRecurrenceEnum.NONE,
-        xp_reward=200,
-        coin_reward=20,
-        due_date=datetime(2026, 3, 15, 23, 59, 59, tzinfo=timezone.utc),
-        completed_at=None,
-        created_at=_NOW,
-        updated_at=_NOW,
-    ),
-    TaskRead(
-        id=uuid.UUID("44444444-4444-4444-4444-444444444444"),
-        owner_id=_MOCK_USER_ID,
-        title="Ревью Pull Requests команды",
-        description=None,
-        status=TaskStatusEnum.ACTIVE,
-        priority=TaskPriorityEnum.UNCOMMON,
-        category=TaskCategoryEnum.WORK,
-        recurrence=TaskRecurrenceEnum.DAILY,
-        xp_reward=30,
-        coin_reward=3,
-        due_date=None,
-        completed_at=None,
-        created_at=_NOW,
-        updated_at=_NOW,
-    ),
-]
-
-
-# ── эндпоинты ───────────────────────────────────────────────
 
 @router.get(
     "/",
     response_model=TaskListResponse,
-    summary="Список квестов",
-    description=(
-        "Возвращает постраничный список квестов текущего пользователя. "
-        "Поддерживает фильтрацию по статусу и категории."
-    ),
+    summary="Список моих квестов",
 )
 async def list_tasks(
     page: int = Query(1, ge=1),
     size: int = Query(20, ge=1, le=100),
     status_filter: Optional[TaskStatusEnum] = Query(None, alias="status"),
     category: Optional[TaskCategoryEnum] = Query(None),
+    session: AsyncSession = Depends(get_async_session),
+    current_user: User = Depends(get_current_user)
 ) -> TaskListResponse:
-    filtered = _MOCK_TASKS
-    if status_filter is not None:
-        filtered = [t for t in filtered if t.status == status_filter]
-    if category is not None:
-        filtered = [t for t in filtered if t.category == category]
+    
+    # Базовый запрос с фильтрацией по владельцу
+    query = select(Task).where(Task.owner_id == current_user.id)
+    
+    if status_filter:
+        query = query.where(Task.status == status_filter.value)
+    if category:
+        query = query.where(Task.category == category.value)
+        
+    # Подсчет общего количества (для пагинации)
+    count_query = select(func.count()).select_from(query.subquery())
+    total_result = await session.execute(count_query)
+    total_count = total_result.scalar() or 0
+    
+    # Получение элементов страницы
+    result = await session.execute(query.offset((page - 1) * size).limit(size))
+    tasks = result.scalars().all()
+    
     return TaskListResponse(
-        total=len(filtered),
+        total=total_count,
         page=page,
         size=size,
-        items=filtered,
+        items=tasks
     )
 
 
@@ -131,90 +65,100 @@ async def list_tasks(
     response_model=TaskRead,
     status_code=status.HTTP_201_CREATED,
     summary="Создать новый квест",
-    description="Принимает данные квеста и возвращает созданную запись.",
 )
-async def create_task(body: TaskCreate) -> TaskRead:
-    new_id = uuid.uuid4()
-    return TaskRead(
-        id=new_id,
-        owner_id=_MOCK_USER_ID,
+async def create_task(
+    body: TaskCreate,
+    session: AsyncSession = Depends(get_async_session),
+    current_user: User = Depends(get_current_user)
+) -> TaskRead:
+    
+    new_task = Task(
+        owner_id=current_user.id,
         title=body.title,
         description=body.description,
-        status=TaskStatusEnum.ACTIVE,
-        priority=body.priority,
-        category=body.category,
-        recurrence=body.recurrence,
+        priority=body.priority.value,
+        category=body.category.value,
+        recurrence=body.recurrence.value,
         xp_reward=body.xp_reward,
         coin_reward=body.coin_reward,
         due_date=body.due_date,
-        completed_at=None,
-        created_at=_NOW,
-        updated_at=_NOW,
     )
+    session.add(new_task)
+    await session.commit()
+    await session.refresh(new_task)
+    return new_task
 
 
 @router.get(
     "/{task_id}",
     response_model=TaskRead,
-    summary="Получить квест по ID",
-    description="Возвращает данные одного квеста по его UUID.",
+    summary="Получить квест",
 )
-async def get_task(task_id: uuid.UUID) -> TaskRead:
-    for t in _MOCK_TASKS:
-        if t.id == task_id:
-            return t
-    raise HTTPException(status_code=404, detail="Квест не найден")
+async def get_task(
+    task_id: uuid.UUID,
+    session: AsyncSession = Depends(get_async_session),
+    current_user: User = Depends(get_current_user)
+) -> TaskRead:
+    
+    result = await session.execute(
+        select(Task).where(Task.id == task_id, Task.owner_id == current_user.id)
+    )
+    task = result.scalar_one_or_none()
+    
+    if not task:
+        raise HTTPException(status_code=404, detail="Квест не найден или у вас нет доступа")
+    return task
 
 
 @router.patch(
     "/{task_id}",
     response_model=TaskRead,
     summary="Обновить квест",
-    description="Частичное обновление полей квеста.",
 )
-async def update_task(task_id: uuid.UUID, body: TaskUpdate) -> TaskRead:
-    for t in _MOCK_TASKS:
-        if t.id == task_id:
-            data = t.model_dump()
-            update = body.model_dump(exclude_unset=True)
-            data.update(update)
-            return TaskRead(**data)
-    raise HTTPException(status_code=404, detail="Квест не найден")
-
-
-@router.post(
-    "/{task_id}/complete",
-    response_model=TaskComplete,
-    summary="Выполнить квест",
-    description=(
-        "Отмечает квест как выполненный. Возвращает полученные ОП, монеты, "
-        "новый уровень, звание и разблокированное достижение (если есть)."
-    ),
-)
-async def complete_task(task_id: uuid.UUID) -> TaskComplete:
-    for t in _MOCK_TASKS:
-        if t.id == task_id:
-            return TaskComplete(
-                task_id=t.id,
-                xp_earned=t.xp_reward,
-                coins_earned=t.coin_reward,
-                new_total_xp=135 + t.xp_reward,
-                new_level=2,
-                new_rank_title="Путешественник",
-                achievement_unlocked=None,
-            )
-    raise HTTPException(status_code=404, detail="Квест не найден")
+async def update_task(
+    task_id: uuid.UUID, 
+    body: TaskUpdate,
+    session: AsyncSession = Depends(get_async_session),
+    current_user: User = Depends(get_current_user)
+) -> TaskRead:
+    
+    result = await session.execute(
+        select(Task).where(Task.id == task_id, Task.owner_id == current_user.id)
+    )
+    task = result.scalar_one_or_none()
+    if not task:
+        raise HTTPException(status_code=404, detail="Квест не найден")
+        
+    update_data = body.model_dump(exclude_unset=True)
+    for key, value in update_data.items():
+        if isinstance(value, getattr(TaskStatusEnum, '__class__', type)):
+             value = value.value
+        setattr(task, key, value)
+        
+    session.add(task)
+    await session.commit()
+    await session.refresh(task)
+    return task
 
 
 @router.delete(
     "/{task_id}",
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Удалить квест",
-    description="Удаляет квест по UUID. Операция необратима.",
     response_class=Response,
 )
-async def delete_task(task_id: uuid.UUID):
-    for t in _MOCK_TASKS:
-        if t.id == task_id:
-            return Response(status_code=status.HTTP_204_NO_CONTENT)
-    raise HTTPException(status_code=404, detail="Квест не найден")
+async def delete_task(
+    task_id: uuid.UUID,
+    session: AsyncSession = Depends(get_async_session),
+    current_user: User = Depends(get_current_user)
+):
+    result = await session.execute(
+        select(Task).where(Task.id == task_id, Task.owner_id == current_user.id)
+    )
+    task = result.scalar_one_or_none()
+    if not task:
+        raise HTTPException(status_code=404, detail="Квест не найден")
+        
+    await session.delete(task)
+    await session.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

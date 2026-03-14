@@ -118,9 +118,9 @@ class Task(Base):
         comment="расширенное описание (поддерживается markdown)",
     )
 
-    # ── RPG-атрибуты ─────────────────────────────────────────
+# ── RPG-атрибуты ─────────────────────────────────────────
     status: Mapped[TaskStatus] = mapped_column(
-        Enum(TaskStatus, name="task_status", create_constraint=True),
+        Enum(TaskStatus, name="task_status", values_callable=lambda obj: [e.value for e in obj], create_constraint=True),
         default=TaskStatus.ACTIVE,
         server_default=TaskStatus.ACTIVE.value,
         nullable=False,
@@ -128,14 +128,14 @@ class Task(Base):
         comment="текущий статус квеста",
     )
     priority: Mapped[TaskPriority] = mapped_column(
-        Enum(TaskPriority, name="task_priority", create_constraint=True),
+        Enum(TaskPriority, name="task_priority", values_callable=lambda obj: [e.value for e in obj], create_constraint=True),
         default=TaskPriority.COMMON,
         server_default=TaskPriority.COMMON.value,
         nullable=False,
         comment="редкость / приоритет",
     )
     category: Mapped[TaskCategory] = mapped_column(
-        Enum(TaskCategory, name="task_category", create_constraint=True),
+        Enum(TaskCategory, name="task_category", values_callable=lambda obj: [e.value for e in obj], create_constraint=True),
         default=TaskCategory.OTHER,
         server_default=TaskCategory.OTHER.value,
         nullable=False,
@@ -143,7 +143,7 @@ class Task(Base):
         comment="категория — сфера жизни",
     )
     recurrence: Mapped[TaskRecurrence] = mapped_column(
-        Enum(TaskRecurrence, name="task_recurrence", create_constraint=True),
+        Enum(TaskRecurrence, name="task_recurrence", values_callable=lambda obj: [e.value for e in obj], create_constraint=True),
         default=TaskRecurrence.NONE,
         server_default=TaskRecurrence.NONE.value,
         nullable=False,

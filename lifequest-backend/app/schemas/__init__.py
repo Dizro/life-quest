@@ -23,3 +23,8 @@ from app.schemas.common import (         # noqa: F401
     PaginatedResponse,
     ErrorResponse,
 )
+
+from app.schemas.token import (          # noqa: F401
+    Token,
+    TokenPayload,
+)

@@ -22,6 +22,12 @@ class Settings(BaseSettings):
         "postgresql+asyncpg://lifequest_user:lifequest_pass@db:5432/lifequest_db"
     )
 
+    # ── JWT Auth ───────────────────────────────────────────────
+    SECRET_KEY: str = "super-secret-key-change-it-in-production"
+    ALGORITHM: str = "HS256"
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
+    REFRESH_TOKEN_EXPIRE_DAYS: int = 7
+
     @property
     def DATABASE_URL_SYNC(self) -> str:
         """синхронный URL для Alembic-миграций (psycopg2 вместо asyncpg)."""
