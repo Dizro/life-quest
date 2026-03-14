@@ -10,7 +10,8 @@
     - ix_tasks_created_at
 
 Связи:
-    - owner → User (многие-к-одному, back_populates="tasks")
+    - owner  → User (многие-к-одному, back_populates="tasks")
+    - parent → Task (один-ко-многим, adjacency list)
 """
 
 from __future__ import annotations
@@ -44,7 +45,8 @@ class TaskStatus(str, enum.Enum):
     """жизненный цикл квеста."""
     ACTIVE = "active"
     COMPLETED = "completed"
-    FAILED = "failed"
+    TRIAL = "trial"
+    REDEEMED = "redeemed"
     ARCHIVED = "archived"
 
 
@@ -95,6 +97,13 @@ class Task(Base):
         nullable=False,
         index=True,
         comment="FK → users.id",
+    )
+    parent_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("tasks.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+        comment="FK → tasks.id (подзадачи)",
     )
 
     # ── основные поля ────────────────────────────────────────
@@ -169,6 +178,12 @@ class Task(Base):
         nullable=True,
         comment="когда квест был выполнен",
     )
+    trial_since: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        index=True,
+        comment="дата перехода в статус испытания",
+    )
 
     # ── временные метки ──────────────────────────────────────
     created_at: Mapped[datetime] = mapped_column(
@@ -191,6 +206,16 @@ class Task(Base):
         "User",
         back_populates="tasks",
         lazy="joined",
+    )
+    children: Mapped[list[Task]] = relationship(
+        "Task",
+        back_populates="parent",
+        cascade="all, delete-orphan",
+    )
+    parent: Mapped[Optional[Task]] = relationship(
+        "Task",
+        back_populates="children",
+        remote_side=[id],
     )
 
     def __repr__(self) -> str:

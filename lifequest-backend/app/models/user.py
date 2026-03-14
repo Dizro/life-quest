@@ -34,6 +34,7 @@ from app.core.database import Base
 if TYPE_CHECKING:
     from app.models.task import Task
     from app.models.user_achievement import UserAchievement
+    from app.models.user_buff import UserBuff
 
 
 class User(Base):
@@ -123,6 +124,44 @@ class User(Base):
         nullable=False,
     )
 
+    # ── игровые метрики ──────────────────────────────────────
+    crystals: Mapped[int] = mapped_column(
+        Integer,
+        default=0,
+        server_default="0",
+        nullable=False,
+        comment="премиум-валюта (кристаллы)",
+    )
+    current_streak: Mapped[int] = mapped_column(
+        Integer,
+        default=0,
+        server_default="0",
+        nullable=False,
+        comment="текущая серия дней без пропусков",
+    )
+    best_streak: Mapped[int] = mapped_column(
+        Integer,
+        default=0,
+        server_default="0",
+        nullable=False,
+        comment="максимальная серия дней",
+    )
+
+    # ── активность и онбординг ───────────────────────────────
+    last_active_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        index=True,
+        comment="время последней активности пользователя",
+    )
+    onboarding_completed: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        server_default="false",
+        nullable=False,
+        comment="флаг завершения онбординга",
+    )
+
     # ── временные метки ──────────────────────────────────────
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -148,6 +187,12 @@ class User(Base):
     )
     achievements: Mapped[List[UserAchievement]] = relationship(
         "UserAchievement",
+        back_populates="user",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+    )
+    buffs: Mapped[List[UserBuff]] = relationship(
+        "UserBuff",
         back_populates="user",
         cascade="all, delete-orphan",
         lazy="selectin",
