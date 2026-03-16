@@ -1,41 +1,100 @@
-# 🎮 LifeQuest
+```markdown
+# 🎮 LifeQuest Backend API
 
-Геймифицированный трекер задач в формате RPG. Каждая задача — квест, за выполнение которого герой получает опыт, монеты и достижения.
+Бэкенд-часть геймифицированного трекера задач в формате RPG. Каждая задача — это квест, за выполнение которого герой получает опыт, монеты и достижения.
 
-> ⚠️ Проект в активной разработке — это MVP первого спринта. Функционал расширяется с каждым спринтом.
+⚠️ **Текущий статус:** Завершен Спринт 2 (MVP). Бэкенд переведен на работу с реальной базой данных PostgreSQL, внедрена JWT-авторизация и реализованы базовые CRUD-операции.
 
-## Стек
+![Swagger UI](docs/swagger.png) 
 
-**Бэкенд:** FastAPI · PostgreSQL 15 · Redis · Celery · SQLAlchemy 2.0 · Alembic · Docker
+## 🛠 Технологический стек
+* **Фреймворк:** FastAPI (Python 3.10+)
+* **База данных:** PostgreSQL 15 + SQLAlchemy 2.0 (ORM) + Alembic (Миграции)
+* **Кэш / Очереди:** Redis + Celery
+* **Безопасность:** JWT (Access/Refresh токен), bcrypt (хеширование паролей)
+* **Инфраструктура:** Docker, docker-compose
 
-## Быстрый старт
+---
 
+## 🚀 Быстрый старт (Docker)
+
+Для запуска бэкенда локально потребуется только установленный Docker.
+
+**1. Клонировать репозиторий:**
 ```bash
-# 1. Клонировать
-git clone https://codelab.tpu.ru/egk17/lifequest.git
+git clone [https://codelab.tpu.ru/egk17/lifequest.git](https://codelab.tpu.ru/egk17/lifequest.git)
 cd lifequest/lifequest-backend
 
-# 2. Создать .env
+```
+
+**2. Настроить переменные окружения:**
+
+```bash
 cp .env.example .env
 
-# 3. Поднять всё
-docker-compose up --build
-
-# 4. Открыть API docs
-# http://localhost:8000/docs
 ```
 
-Без Docker:
+*(В файле `.env.example` уже заданы дефолтные параметры для локального запуска).*
+
+**3. Поднять контейнеры:**
 
 ```bash
-cd lifequest-backend
-pip install -r requirements.txt
-uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
+docker-compose up -d --build
+
 ```
 
-## Проверка
+**4. Применить миграции и наполнить базу стартовыми данными:**
 
 ```bash
-curl http://localhost:8000/health
-# {"status":"ok","message":"LifeQuest API работает"}
+docker-compose exec api alembic upgrade head
+docker-compose exec api python seed.py
+
+```
+
+**5. Открыть документацию API:**
+
+* Swagger UI: [http://localhost:8000/docs](https://www.google.com/search?q=http://localhost:8000/docs)
+* ReDoc: [http://localhost:8000/redoc](https://www.google.com/search?q=http://localhost:8000/redoc)
+
+---
+
+## 📡 Информация для Frontend-разработчиков (Работа с JWT)
+
+API использует JWT-авторизацию. Большинство эндпоинтов закрыты для неавторизованных пользователей.
+
+**Как работать с авторизацией:**
+
+1. Зарегистрируйте пользователя: `POST /api/v1/users/`
+2. Получите токен: `POST /api/v1/auth/login` (данные передаются как `application/x-www-form-urlencoded`).
+3. Сервер вернет JSON с `access_token`.
+4. В последующие запросы к API добавляйте HTTP-заголовок:
+`Authorization: Bearer <ваш_access_token>`
+
+**Ключевые эндпоинты:**
+
+* `GET /api/v1/users/me` — профиль текущего авторизованного героя (RPG-статистика).
+* `GET /api/v1/tasks/` — список квестов (изолированно, возвращает задачи только владельца токена).
+* `GET /api/v1/achievements/` — каталог доступных достижений.
+
+---
+
+## 🏗 Архитектура проекта
+
+```text
+lifequest-backend/
+├── alembic/        # Файлы миграций базы данных
+├── app/
+│   ├── api/        # Роуты (эндпоинты) API v1
+│   ├── core/       # Конфигурация, безопасность, подключение к БД
+│   ├── models/     # SQLAlchemy ORM модели (User, Task, Achievement, UserBuff)
+│   ├── schemas/    # Pydantic-схемы (контракты запрос/ответ)
+│   └── main.py     # Точка входа FastAPI
+├── .env.example    # Шаблон переменных окружения
+├── docker-compose.yml
+└── seed.py         # Скрипт наполнения БД стартовыми данными
+
+```
+
+```
+
 ```
