@@ -21,7 +21,7 @@
 
 **1. Клонировать репозиторий:**
 ```bash
-git clone [https://codelab.tpu.ru/egk17/lifequest.git](https://codelab.tpu.ru/egk17/lifequest.git)
+git clone https://codelab.tpu.ru/egk17/lifequest.git
 cd lifequest/lifequest-backend
 
 ```
