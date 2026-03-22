@@ -1,9 +1,23 @@
+"""
+seed.py — наполнение базы стартовыми и тестовыми данными.
+
+Запуск внутри Docker:
+    docker-compose exec api python seed.py
+
+Идемпотентен: повторный запуск не создаёт дубли.
+"""
+
 import asyncio
 import logging
+from datetime import datetime, timedelta, timezone
+
 from sqlalchemy import select
 
 from app.core.database import async_session_factory
+from app.core.security import get_password_hash
 from app.models.achievement import Achievement
+from app.models.task import Task
+from app.models.user import User
 
 logging.basicConfig(
     level=logging.INFO,
@@ -11,7 +25,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger("seed")
 
-# каталог достижений для MVP
+
+# ── каталог достижений ────────────────────────────────────────────────────────
+
 INITIAL_ACHIEVEMENTS = [
     {
         "code": "first_quest_completed",
@@ -47,42 +63,164 @@ INITIAL_ACHIEVEMENTS = [
         "description": "Успешно завершите испытание.",
         "icon_url": "🛡️",
         "xp_bonus": 25,
-    }
+    },
 ]
 
 
+# ── тестовые пользователи ─────────────────────────────────────────────────────
+
+TEST_USERS = [
+    {
+        "username": "test_hero",
+        "email": "test@lifequest.app",
+        "password": "Test1234!",
+        "display_name": "Тестовый Герой",
+        "level": 3,
+        "experience_points": 450,
+        "coins": 80,
+        "current_streak": 5,
+    },
+    {
+        "username": "qa_tester",
+        "email": "qa@lifequest.app",
+        "password": "QaTest1234!",
+        "display_name": "QA Тестировщик",
+        "level": 1,
+        "experience_points": 0,
+        "coins": 50,
+        "current_streak": 0,
+    },
+]
+
+
+# ── тестовые задачи (создаются для test_hero) ─────────────────────────────────
+
+def _make_tasks(user_id) -> list[dict]:
+    now = datetime.now(timezone.utc)
+    return [
+        {
+            "owner_id": user_id,
+            "title": "Утренняя зарядка",
+            "description": "15 минут зарядки каждое утро",
+            "task_type": "daily",
+            "effort_score": 3,
+            "status": "active",
+            "recurrence": "daily",
+            "category": "health",
+        },
+        {
+            "owner_id": user_id,
+            "title": "Написать реферат по физике",
+            "description": "Тема: квантовая механика, 10 страниц",
+            "task_type": "regular",
+            "effort_score": 8,
+            "status": "active",
+            "due_date": now + timedelta(days=3),
+            "category": "study",
+        },
+        {
+            "owner_id": user_id,
+            "title": "Позвонить маме",
+            "description": None,
+            "task_type": "regular",
+            "effort_score": 2,
+            "status": "completed",
+            "completed_at": now - timedelta(hours=2),
+            "category": "family",
+        },
+        {
+            "owner_id": user_id,
+            "title": "Сдать лабораторную по химии",
+            "description": "Просрочена на 10 дней",
+            "task_type": "regular",
+            "effort_score": 7,
+            "status": "trial",
+            "trial_since": now - timedelta(days=10),
+            "due_date": now - timedelta(days=10),
+            "category": "study",
+        },
+        {
+            "owner_id": user_id,
+            "title": "Выпить воду",
+            "description": "8 стаканов в день",
+            "task_type": "habit",
+            "effort_score": 1,
+            "status": "active",
+            "recurrence": "daily",
+            "category": "health",
+        },
+        {
+            "owner_id": user_id,
+            "title": "Прочитать главу книги",
+            "description": "Атомные привычки — глава 3",
+            "task_type": "regular",
+            "effort_score": 4,
+            "status": "active",
+            "due_date": now + timedelta(days=1),
+            "category": "study",
+        },
+    ]
+
+
+# ── основная функция ──────────────────────────────────────────────────────────
+
 async def seed_data():
-    """Асинхронная функция для наполнения базы стартовыми данными."""
-    logger.info("Начинаем проверку и сидирование базы данных...")
-    
+    logger.info("Начинаем проверку и наполнение базы данных...")
+
     async with async_session_factory() as session:
         try:
+            # ── достижения ────────────────────────────────────────────────────
             result = await session.execute(select(Achievement.code))
             existing_codes = set(result.scalars().all())
 
-            new_achievements = []
-            
-            for ach_data in INITIAL_ACHIEVEMENTS:
-                if ach_data["code"] not in existing_codes:
-                    new_achievement = Achievement(**ach_data)
-                    new_achievements.append(new_achievement)
-
+            new_achievements = [
+                Achievement(**data)
+                for data in INITIAL_ACHIEVEMENTS
+                if data["code"] not in existing_codes
+            ]
             if new_achievements:
                 session.add_all(new_achievements)
                 await session.commit()
-                
-                logger.info(f"Успешно добавлено новых достижений: {len(new_achievements)}")
-                for ach in new_achievements:
-                    logger.info(f"  + {ach.title} ({ach.code})")
+                logger.info(f"Добавлено достижений: {len(new_achievements)}")
+                for a in new_achievements:
+                    logger.info(f"  + {a.title} ({a.code})")
             else:
-                logger.info("База данных уже содержит все базовые достижения. Пропуск.")
+                logger.info("Достижения уже существуют. Пропуск.")
+
+            # ── тестовые пользователи ─────────────────────────────────────────
+            for user_data in TEST_USERS:
+                res = await session.execute(
+                    select(User).where(User.username == user_data["username"])
+                )
+                existing = res.scalar_one_or_none()
+                if existing:
+                    logger.info(f"Пользователь «{user_data['username']}» уже существует. Пропуск.")
+                    continue
+
+                password = user_data.pop("password")
+                new_user = User(
+                    **user_data,
+                    hashed_password=get_password_hash(password),
+                )
+                session.add(new_user)
+                await session.flush()  # получаем new_user.id до commit
+
+                # задачи только для test_hero
+                if new_user.username == "test_hero":
+                    tasks = [Task(**t) for t in _make_tasks(new_user.id)]
+                    session.add_all(tasks)
+                    logger.info(f"  + {len(tasks)} тестовых задач для «{new_user.username}»")
+
+                logger.info(f"Создан пользователь: {new_user.username} (lvl {new_user.level})")
+
+            await session.commit()
+            logger.info("Наполнение базы завершено.")
 
         except Exception as e:
             await session.rollback()
-            logger.error(f"Критическая ошибка при сидировании: {e}")
+            logger.error(f"Критическая ошибка: {e}")
             raise
 
 
 if __name__ == "__main__":
-    # event loop
     asyncio.run(seed_data())
