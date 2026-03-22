@@ -12,13 +12,20 @@ from typing import List, Optional
 from pydantic import BaseModel, Field, ConfigDict
 
 
-# ── перечисления (дублируют SQLAlchemy-перечисления для слоя API) ──
+# ── перечисления ──────────────────────────────────────────────────────────────
 
 class TaskStatusEnum(str, Enum):
     ACTIVE = "active"
     COMPLETED = "completed"
-    FAILED = "failed"
+    TRIAL = "trial"        # было FAILED — исправлено
+    REDEEMED = "redeemed"  # добавлено
     ARCHIVED = "archived"
+
+
+class TaskTypeEnum(str, Enum):  # добавлено для нового поля task_type
+    REGULAR = "regular"
+    DAILY = "daily"
+    HABIT = "habit"
 
 
 class TaskPriorityEnum(str, Enum):
@@ -44,7 +51,7 @@ class TaskCategoryEnum(str, Enum):
     OTHER = "other"
 
 
-# ── запросы ──────────────────────────────────────────────────
+# ── запросы ───────────────────────────────────────────────────────────────────
 
 class TaskCreate(BaseModel):
     """POST /api/v1/tasks — создание нового квеста."""
@@ -61,9 +68,13 @@ class TaskCreate(BaseModel):
         examples=["15 минут медитации перед завтраком"],
         description="Развёрнутое описание (поддерживается markdown)",
     )
+    task_type: TaskTypeEnum = Field(
+        default=TaskTypeEnum.REGULAR,
+        description="Тип задачи: обычная / ежедневная / привычка",
+    )
     priority: TaskPriorityEnum = Field(
         default=TaskPriorityEnum.COMMON,
-        description="Редкость / приоритет (влияет на множитель награды)",
+        description="Редкость / приоритет",
     )
     category: TaskCategoryEnum = Field(
         default=TaskCategoryEnum.OTHER,
@@ -78,18 +89,8 @@ class TaskCreate(BaseModel):
         examples=["2026-03-15T23:59:59Z"],
         description="Дедлайн (ISO 8601, с часовым поясом)",
     )
-    xp_reward: int = Field(
-        default=10,
-        ge=1,
-        le=1000,
-        description="Награда в очках опыта",
-    )
-    coin_reward: int = Field(
-        default=1,
-        ge=0,
-        le=500,
-        description="Награда в монетах",
-    )
+    xp_reward: int = Field(default=10, ge=1, le=1000, description="Награда в очках опыта")
+    coin_reward: int = Field(default=1, ge=0, le=500, description="Награда в монетах")
 
 
 class TaskUpdate(BaseModel):
@@ -113,13 +114,14 @@ class TaskComplete(BaseModel):
     new_total_xp: int
     new_level: int
     new_rank_title: str
+    leveled_up: bool = Field(default=False, description="Был ли повышен уровень")
     achievement_unlocked: Optional[str] = Field(
         default=None,
         description="Код разблокированного достижения (если есть)",
     )
 
 
-# ── ответы ───────────────────────────────────────────────────
+# ── ответы ────────────────────────────────────────────────────────────────────
 
 class TaskRead(BaseModel):
     """представление одного квеста."""
@@ -129,14 +131,17 @@ class TaskRead(BaseModel):
     owner_id: uuid.UUID
     title: str
     description: Optional[str]
+    task_type: TaskTypeEnum
     status: TaskStatusEnum
     priority: TaskPriorityEnum
     category: TaskCategoryEnum
     recurrence: TaskRecurrenceEnum
+    effort_score: Optional[int]
     xp_reward: int
     coin_reward: int
     due_date: Optional[datetime]
     completed_at: Optional[datetime]
+    trial_since: Optional[datetime]
     created_at: datetime
     updated_at: datetime
 
