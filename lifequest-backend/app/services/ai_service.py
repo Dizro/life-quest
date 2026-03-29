@@ -41,9 +41,9 @@ SYSTEM_PROMPT = """Ты — объективный оценщик сложнос
   7-8 = сложная задача 3–8 часов (написать реферат, сдать лабораторную)
   9-10= масштабный проект дни/недели (глава диплома, большой проект)
 
-Ответь строго в формате:
-SCORE: [число от 0 до 10]
-REASON: [одно предложение на русском]"""
+Ответь строго в 2 строки без лишних символов и скобок:
+SCORE: число от 0 до 10
+REASON: одно предложение на русском"""
 
 DEFAULT_ES = 5
 AI_TIMEOUT_SECONDS = 3.0
@@ -57,7 +57,7 @@ def _parse_score(text: str) -> int:
     Извлекает число после 'SCORE:'.
     При ошибке парсинга → DEFAULT_ES (по ТЗ §7.1).
     """
-    match = re.search(r"SCORE:\s*(\d{1,2})", text)
+    match = re.search(r"SCORE:\s*\[?(\d{1,2})\]?", text, re.IGNORECASE)
     if match:
         score = int(match.group(1))
         return max(0, min(10, score))
@@ -66,7 +66,7 @@ def _parse_score(text: str) -> int:
 
 def _parse_reason(text: str) -> str:
     """Извлекает обоснование после 'REASON:'."""
-    match = re.search(r"REASON:\s*(.+)", text)
+    match = re.search(r"REASON:\s*\[?([^\]]+)\]?", text, re.IGNORECASE)
     return match.group(1).strip() if match else ""
 
 
