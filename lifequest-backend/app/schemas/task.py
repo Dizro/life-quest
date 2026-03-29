@@ -9,7 +9,7 @@ from datetime import datetime
 from enum import Enum
 from typing import List, Optional
 
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, field_validator
 
 
 # ── перечисления ──────────────────────────────────────────────────────────────
@@ -58,11 +58,19 @@ class TaskCreate(BaseModel):
     """POST /api/v1/tasks — создание нового квеста."""
     title: str = Field(
         ...,
-        min_length=1,
         max_length=255,
         examples=["Утренняя медитация"],
-        description="Название квеста",
+        description="Название квеста (мин. 3 слова или 10 символов)",
     )
+
+    @field_validator("title")
+    def validate_title(cls, v: str) -> str:
+        v_clean = v.strip()
+        if len(v_clean) < 10 and len(v_clean.split()) < 3:
+            raise ValueError("Название должно содержать минимум 3 слова или быть длиннее 10 символов")
+        if v_clean.isdigit():
+            raise ValueError("Название не может состоять только из цифр")
+        return v
     description: Optional[str] = Field(
         default=None,
         max_length=4000,
@@ -119,6 +127,10 @@ class TaskComplete(BaseModel):
     achievement_unlocked: Optional[str] = Field(
         default=None,
         description="Код разблокированного достижения (если есть)",
+    )
+    farrix_comment: Optional[str] = Field(
+        default=None,
+        description="Комментарий ИИ-наставника при завершении",
     )
 
 

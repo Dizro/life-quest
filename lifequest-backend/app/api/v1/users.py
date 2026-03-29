@@ -10,8 +10,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_async_session
 from app.core.security import get_password_hash
 from app.models.user import User
+from app.models.user_buff import UserBuff
 from app.schemas.user import UserCreate, UserRead, UserUpdate, UserProfile
 from app.api.dependencies import get_current_user
+from datetime import datetime, timezone, timedelta
 
 router = APIRouter()
 
@@ -35,14 +37,28 @@ async def create_user(
             detail="Пользователь с таким логином или email уже существует"
         )
     
-    # Создание пользователя
+    # Создание пользователя (FR-1.5: стартовый капитал 50 монет)
+    now_utc = datetime.now(timezone.utc)
     new_user = User(
         username=body.username,
         email=body.email,
         hashed_password=get_password_hash(body.password),
-        display_name=body.display_name
+        display_name=body.display_name,
+        coins=50,
+        last_active_at=now_utc
     )
     session.add(new_user)
+    await session.flush()
+    
+    # Стартовый бафф х2.0 XP на 3 дня
+    start_buff = UserBuff(
+        user_id=new_user.id,
+        buff_type="xp_boost",
+        multiplier=2.0,
+        expires_at=now_utc + timedelta(days=3)
+    )
+    session.add(start_buff)
+    
     await session.commit()
     await session.refresh(new_user)
     

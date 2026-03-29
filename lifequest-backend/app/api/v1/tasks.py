@@ -4,7 +4,7 @@
 """
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
@@ -20,6 +20,7 @@ from app.schemas.task import (
 )
 from app.api.dependencies import get_current_user
 from app.services.reward_service import calculate_rewards, apply_rewards_and_check_levelup
+from app.services.achievement_service import check_and_grant_achievements
 from app.services.ai_service import should_reevaluate
 from app.tasks.celery_tasks import evaluate_es_task
 
@@ -77,6 +78,35 @@ async def create_task(
     session: AsyncSession = Depends(get_async_session),
     current_user: User = Depends(get_current_user)
 ) -> TaskRead:
+
+    # ── Проверка лимита: не более 500 активных задач (FR-2.9) ─────────────────
+    active_count = await session.execute(
+        select(func.count()).select_from(Task).where(
+            Task.owner_id == current_user.id,
+            Task.status.in_(["active", "pending_es", "trial"])
+        )
+    )
+    if (active_count.scalar() or 0) >= 500:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Превышен лимит в 500 активных задач"
+        )
+        
+    # ── Проверка Слой 0: Дубликат названия за 24ч ────────────────────────────
+    now_utc = datetime.now(timezone.utc)
+    day_ago = now_utc - timedelta(hours=24)
+    duplicate = await session.execute(
+        select(Task.id).where(
+            Task.owner_id == current_user.id,
+            Task.title == body.title,
+            Task.created_at >= day_ago
+        ).limit(1)
+    )
+    if duplicate.first():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Точный дубликат задачи за последние 24 часа. Сформулируйте иначе."
+        )
 
     new_task = Task(
         owner_id=current_user.id,
@@ -142,12 +172,13 @@ async def update_task(
     if not task:
         raise HTTPException(status_code=404, detail="Квест не найден")
 
-    # ⚑ Запрет редактирования текста задачи в статусе «Испытание» (ТЗ §6.6)
-    if task.status.value == "trial" and body.title is not None:
-        raise HTTPException(
-            status_code=400,
-            detail="Редактирование текста задачи в статусе «Испытание» запрещено"
-        )
+    # ⚑ Запрет редактирования текста и срока задачи в статусе «Испытание»
+    if task.status.value == "trial":
+        if any(v is not None for v in [body.title, body.description, body.due_date]):
+            raise HTTPException(
+                status_code=400,
+                detail="Редактирование названия, описания и срока запрещено в статусе «Испытание»"
+            )
 
     # Запоминаем старый title для проверки кэша ES (§7.3)
     old_title = task.title
@@ -228,20 +259,86 @@ async def complete_task(
         )
     if task.status.value in ("completed", "redeemed", "archived"):
         raise HTTPException(
-            status_code=400,
+            status_code=status.HTTP_409_CONFLICT,
             detail=f"Нельзя выполнить квест со статусом «{task.status.value}»"
         )
 
+    # ── Слой 2: Агрегация дневных наград ──────────────────────────────────────
+    today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    
+    totals_query = select(
+        func.sum(Task.xp_reward).label("total_xp"),
+        func.sum(Task.coin_reward).label("total_gold")
+    ).where(
+        Task.owner_id == current_user.id,
+        Task.status == "completed",
+        Task.completed_at >= today_start
+    )
+    totals_res = (await session.execute(totals_query)).first()
+    today_xp = totals_res.total_xp or 0
+    today_gold = totals_res.total_gold or 0
+    
+    habit_query = select(func.sum(Task.xp_reward)).where(
+        Task.owner_id == current_user.id,
+        Task.status == "completed",
+        Task.task_type == "habit",
+        Task.completed_at >= today_start
+    )
+    today_habit_xp = (await session.execute(habit_query)).scalar() or 0
+
     # ── рассчитать награду ────────────────────────────────────────────────────
-    xp_earned, gold_earned = calculate_rewards(task, current_user)
+    xp_earned, gold_earned = calculate_rewards(
+        task, 
+        current_user,
+        today_xp=today_xp,
+        today_gold=today_gold,
+        today_habit_xp=today_habit_xp
+    )
 
     # ── обновить задачу ───────────────────────────────────────────────────────
+    is_trial = (task.status.value == "trial")
     task.status = "completed"
     task.completed_at = datetime.now(timezone.utc)
+    task.xp_reward = xp_earned      # Сохраняем реальную полученную награду
+    task.coin_reward = gold_earned  # для агрегации потолка
     session.add(task)
+
+    # ── начисление стрика ─────────────────────────────────────────────────────
+    if task.task_type.value == "daily" and not is_trial:
+        today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+        completed_today_query = select(Task.id).where(
+            Task.owner_id == current_user.id,
+            Task.task_type == "daily",
+            Task.status == "completed",
+            Task.completed_at >= today_start,
+            Task.id != task.id
+        ).limit(1)
+        already_completed = (await session.execute(completed_today_query)).first()
+
+        if not already_completed:
+            current_user.current_streak += 1
+            if current_user.current_streak > current_user.best_streak:
+                current_user.best_streak = current_user.current_streak
 
     # ── начислить награду и проверить уровень ─────────────────────────────────
     leveled_up = apply_rewards_and_check_levelup(current_user, xp_earned, gold_earned)
+    # ── проверка выдачи достижений ────────────────────────────────────────────
+    unlocked_ach = await check_and_grant_achievements(
+        session=session,
+        user=current_user,
+        is_trial_completed=is_trial,
+        task_completed=True,
+    )
+
+    # ── генерация комментария Фаррикса (заглушка/MVP) ─────────────────────────
+    farrix_comment = None
+    if task.effort_score == 0:
+        farrix_comment = "Можешь обманывать себя, но Фаррикса не проведешь. Оценка: спам. Награда: 0."
+    elif task.effort_score is not None and task.effort_score >= 6:
+        farrix_comment = "Отличная работа! Это был трудный квест, но ты справился блестяще!"
+    elif xp_earned > 0: # если это не спам-задача
+        farrix_comment = "Молодец! Ещё один шаг к величию!"
+
     current_user.last_active_at = datetime.now(timezone.utc)
     session.add(current_user)
 
@@ -256,4 +353,62 @@ async def complete_task(
         new_level=current_user.level,
         new_rank_title=current_user.rank_title,
         leveled_up=leveled_up,
+        achievement_unlocked=",".join(unlocked_ach) if unlocked_ach else None,
+        farrix_comment=farrix_comment,
     )
+
+
+@router.post(
+    "/{task_id}/redeem",
+    summary="Выкупить квест за монеты",
+    description="Выкупает просроченную задачу (испытание) за Gold. Лимит: 3 раза в сутки.",
+)
+async def redeem_task(
+    task_id: uuid.UUID,
+    session: AsyncSession = Depends(get_async_session),
+    current_user: User = Depends(get_current_user),
+):
+    result = await session.execute(
+        select(Task).where(Task.id == task_id, Task.owner_id == current_user.id)
+    )
+    task = result.scalar_one_or_none()
+    if not task:
+        raise HTTPException(status_code=404, detail="Квест не найден")
+        
+    if task.status.value != "trial":
+        raise HTTPException(status_code=400, detail="Можно выкупить только квест в статусе «Испытание»")
+        
+    # Проверка лимита: 3 выкупа в сутки
+    today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    redeem_count_res = await session.execute(
+        select(func.count()).select_from(Task).where(
+            Task.owner_id == current_user.id,
+            Task.status == "redeemed",
+            Task.updated_at >= today_start
+        )
+    )
+    count = redeem_count_res.scalar() or 0
+    if count >= 3:
+        raise HTTPException(status_code=400, detail="Достигнут дневной лимит: не более 3 выкупов в сутки")
+        
+    es = task.effort_score if task.effort_score is not None else 5
+    cost = es * 10
+    
+    if current_user.coins < cost:
+        raise HTTPException(status_code=400, detail=f"Недостаточно монет для выкупа (нужно {cost} Gold)")
+        
+    current_user.coins -= cost
+    task.status = "redeemed"
+    # task.updated_at обновится автоматически
+    
+    session.add(current_user)
+    session.add(task)
+    await session.commit()
+    await session.refresh(current_user)
+    
+    return {
+        "task_id": task.id,
+        "redeemed": True,
+        "cost": cost,
+        "remaining_coins": current_user.coins
+    }

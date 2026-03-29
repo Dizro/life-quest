@@ -58,8 +58,14 @@ def _get_status_mult(task: "Task") -> float:
         trial_since = trial_since.replace(tzinfo=timezone.utc)
 
     weeks_overdue = (now - trial_since).days // 7
-    mult = max(0.2, 0.5 - weeks_overdue * 0.1)
-    return mult
+    if weeks_overdue <= 1:
+        return 0.5
+    elif weeks_overdue == 2:
+        return 0.4
+    elif weeks_overdue == 3:
+        return 0.3
+    else:
+        return 0.2
 
 
 def _get_buff_mult(user: "User") -> float:
@@ -82,14 +88,16 @@ def _get_buff_mult(user: "User") -> float:
 
 # ── основной расчёт ───────────────────────────────────────────────────────────
 
-def calculate_rewards(task: "Task", user: "User") -> tuple[int, int]:
+def calculate_rewards(
+    task: "Task", 
+    user: "User",
+    today_xp: int = 0,
+    today_gold: int = 0,
+    today_habit_xp: int = 0
+) -> tuple[int, int]:
     """
     Возвращает (xp_earned, gold_earned) с учётом всех множителей и дневного лимита.
-
-    Дневной лимит проверяется по-простому: если пользователь уже набрал
-    больше лимита за день — возвращаем (0, 0).
-    Для точного подсчёта «уже заработанного сегодня» нужен отдельный запрос к БД
-    (реализуется в следующем спринте через агрегацию OutboxEvent).
+    Слой 2 защиты: дневной лимит агрегируется на основе переданных сумм за сегодня.
     """
     es: int = task.effort_score if task.effort_score is not None else 5
     task_type: str = task.task_type.value if task.task_type else "regular"
@@ -104,12 +112,21 @@ def calculate_rewards(task: "Task", user: "User") -> tuple[int, int]:
     raw_xp   = int(es * base_xp   * type_mult * status_mult * buff_mult)
     raw_gold = int(es * base_gold * type_mult * status_mult * 1.0)  # Gold-бафф не влияет на это место
 
-    # дневной потолок
+    # Дневной потолок (FR-5.5)
     daily_xp_cap   = 200 + (user.level * 20)
     daily_gold_cap = 100 + (user.level * 10)
+    
+    # Отдельный лимит для привычек
+    if task_type == "habit":
+        habit_cap = 30
+        available_habit_xp = max(0, habit_cap - today_habit_xp)
+        raw_xp = min(raw_xp, available_habit_xp)
 
-    xp_earned   = min(raw_xp,   daily_xp_cap)
-    gold_earned = min(raw_gold, daily_gold_cap)
+    available_xp = max(0, daily_xp_cap - today_xp)
+    available_gold = max(0, daily_gold_cap - today_gold)
+
+    xp_earned   = min(raw_xp, available_xp)
+    gold_earned = min(raw_gold, available_gold)
 
     return xp_earned, gold_earned
 
