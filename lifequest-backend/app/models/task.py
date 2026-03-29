@@ -41,8 +41,15 @@ if TYPE_CHECKING:
 
 # ── перечисления ─────────────────────────────────────────────
 
+class TaskType(str, enum.Enum):
+    REGULAR = "regular"
+    DAILY = "daily"
+    HABIT = "habit"
+
+
 class TaskStatus(str, enum.Enum):
     """жизненный цикл квеста."""
+    PENDING_ES = "pending_es"  # ожидает ИИ-оценки Effort Score
     ACTIVE = "active"
     COMPLETED = "completed"
     TRIAL = "trial"
@@ -119,6 +126,17 @@ class Task(Base):
     )
 
 # ── RPG-атрибуты ─────────────────────────────────────────
+
+    effort_score: Mapped[Optional[int]] = mapped_column(
+        Integer, nullable=True, comment="оценка сложности от ИИ (0–10)"
+    )
+    task_type: Mapped[TaskType] = mapped_column(
+        Enum(TaskType, name="task_type", values_callable=lambda obj: [e.value for e in obj]),
+        default=TaskType.REGULAR,
+        server_default=TaskType.REGULAR.value,
+        nullable=False,
+        comment="тип задачи: regular/daily/habit",
+    )
     status: Mapped[TaskStatus] = mapped_column(
         Enum(TaskStatus, name="task_status", values_callable=lambda obj: [e.value for e in obj], create_constraint=True),
         default=TaskStatus.ACTIVE,

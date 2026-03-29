@@ -20,6 +20,8 @@ from app.schemas.task import (
 )
 from app.api.dependencies import get_current_user
 from app.services.reward_service import calculate_rewards, apply_rewards_and_check_levelup
+from app.services.ai_service import should_reevaluate
+from app.tasks.celery_tasks import evaluate_es_task
 
 router = APIRouter()
 
@@ -65,6 +67,10 @@ async def list_tasks(
     response_model=TaskRead,
     status_code=status.HTTP_201_CREATED,
     summary="Создать новый квест",
+    description=(
+        "Создаёт квест и запускает асинхронную оценку Effort Score через YandexGPT (§7.1). "
+        "Задача сохраняется сразу, ES придёт через Celery-воркер (≤3 сек)."
+    ),
 )
 async def create_task(
     body: TaskCreate,
@@ -83,10 +89,16 @@ async def create_task(
         xp_reward=body.xp_reward,
         coin_reward=body.coin_reward,
         due_date=body.due_date,
+        effort_score=None,  # будет заполнен Celery-воркером после ИИ-оценки
+        status="pending_es",  # BPMN: ожидает ИИ-оценки ES
     )
     session.add(new_task)
     await session.commit()
     await session.refresh(new_task)
+
+    # ── Слой 1: запускаем асинхронную ИИ-оценку ES (BPMN: задача → Celery → YandexGPT)
+    evaluate_es_task.delay(str(new_task.id), new_task.title)
+
     return new_task
 
 
@@ -137,6 +149,9 @@ async def update_task(
             detail="Редактирование текста задачи в статусе «Испытание» запрещено"
         )
 
+    # Запоминаем старый title для проверки кэша ES (§7.3)
+    old_title = task.title
+
     update_data = body.model_dump(exclude_unset=True)
     for key, value in update_data.items():
         if hasattr(value, "value"):
@@ -146,6 +161,16 @@ async def update_task(
     session.add(task)
     await session.commit()
     await session.refresh(task)
+
+    # ── Пересчёт ES при изменении текста >20% (§7.3, FR-3.4)
+    # Если текст изменён менее чем на 20% символов — кэшированный ES остаётся
+    if (
+        body.title is not None
+        and task.status.value != "trial"
+        and should_reevaluate(old_title, task.title)
+    ):
+        evaluate_es_task.delay(str(task.id), task.title)
+
     return task
 
 
@@ -196,6 +221,11 @@ async def complete_task(
         raise HTTPException(status_code=404, detail="Квест не найден")
 
     # ── проверить статус ──────────────────────────────────────────────────────
+    if task.status.value == "pending_es":
+        raise HTTPException(
+            status_code=400,
+            detail="Квест ещё ожидает ИИ-оценки сложности. Попробуйте через несколько секунд."
+        )
     if task.status.value in ("completed", "redeemed", "archived"):
         raise HTTPException(
             status_code=400,

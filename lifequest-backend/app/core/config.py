@@ -41,5 +41,9 @@ class Settings(BaseSettings):
     APP_VERSION: str = "1.0.0"
     DEBUG: bool = True
 
+    # ── YandexGPT (ИИ-оценка Effort Score, §7.1) ─────────────
+    YANDEX_API_KEY: str = ""
+    YANDEX_FOLDER_ID: str = ""
+
 
 settings = Settings()

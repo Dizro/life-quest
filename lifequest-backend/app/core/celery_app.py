@@ -19,5 +19,5 @@ celery_app.conf.update(
     enable_utc=True,
 )
 
-# автоматическое обнаружение задач из модуля app.tasks (когда будет создан)
-# celery_app.autodiscover_tasks(["app.tasks"])
+# автоматическое обнаружение задач из модуля app.tasks.celery_tasks
+celery_app.autodiscover_tasks(["app.tasks"], related_name="celery_tasks")

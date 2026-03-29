@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field, ConfigDict
 # ── перечисления ──────────────────────────────────────────────────────────────
 
 class TaskStatusEnum(str, Enum):
+    PENDING_ES = "pending_es"  # ожидает ИИ-оценки ES
     ACTIVE = "active"
     COMPLETED = "completed"
     TRIAL = "trial"        # было FAILED — исправлено
