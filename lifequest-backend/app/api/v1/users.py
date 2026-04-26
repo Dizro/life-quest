@@ -4,18 +4,21 @@
 """
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_async_session
 from app.core.security import get_password_hash
 from app.models.user import User
 from app.models.user_buff import UserBuff
+from app.models.task import Task
+from app.models.user_achievement import UserAchievement
 from app.schemas.user import UserCreate, UserRead, UserUpdate, UserProfile
 from app.api.dependencies import get_current_user
 from datetime import datetime, timezone, timedelta
 
 router = APIRouter()
+
 
 @router.post(
     "/",
@@ -71,9 +74,34 @@ async def create_user(
     summary="Профиль героя (Мой)",
     description="Возвращает расширенный профиль текущего авторизованного пользователя."
 )
-async def get_my_profile(current_user: User = Depends(get_current_user)) -> UserProfile:
-    # Возвращаем профиль на основе текущего пользователя из JWT
-    # Примечание: quests_completed и achievements_count пока нули (добавятся агрегации в V2)
+async def get_my_profile(
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_async_session),
+) -> UserProfile:
+    """
+    Возвращает профиль текущего пользователя с реальной статистикой:
+    - количество выполненных задач
+    - количество полученных достижений
+    """
+    
+    # 1. Количество выполненных задач (quests_completed)
+    tasks_result = await session.execute(
+        select(func.count()).select_from(Task).where(
+            Task.owner_id == current_user.id,
+            Task.status == "completed"
+        )
+    )
+    quests_completed = tasks_result.scalar() or 0
+    
+    # 2. Количество полученных достижений (achievements_count)
+    achievements_result = await session.execute(
+        select(func.count()).select_from(UserAchievement).where(
+            UserAchievement.user_id == current_user.id
+        )
+    )
+    achievements_count = achievements_result.scalar() or 0
+    
+    # 3. Возвращаем профиль с реальными значениями
     return UserProfile(
         id=current_user.id,
         username=current_user.username,
@@ -86,8 +114,8 @@ async def get_my_profile(current_user: User = Depends(get_current_user)) -> User
         is_active=current_user.is_active,
         created_at=current_user.created_at,
         avatar_url=current_user.avatar_url,
-        quests_completed=0,
-        achievements_count=0,
+        quests_completed=quests_completed,
+        achievements_count=achievements_count,
         current_streak=current_user.current_streak,
     )
 

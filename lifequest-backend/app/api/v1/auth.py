@@ -1,19 +1,28 @@
 # app/api/v1/auth.py
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
-from sqlalchemy import select
+from pydantic import BaseModel
+from sqlalchemy import select, or_, and_, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from datetime import datetime, timezone, timedelta
+
+import jwt
+import uuid
 
 from app.core.database import get_async_session
+from app.core.config import settings
 from app.core.security import verify_password, create_access_token, create_refresh_token
 from app.models.user import User
 from app.models.user_buff import UserBuff
 from app.models.task import Task
 from app.schemas.token import Token
-from datetime import datetime, timezone, timedelta
-from sqlalchemy import or_, and_, update
 
 router = APIRouter()
+
+
+class RefreshRequest(BaseModel):
+    refresh_token: str
+
 
 @router.post("/login", response_model=Token, summary="Авторизация по логину и паролю")
 async def login_access_token(
@@ -69,6 +78,78 @@ async def login_access_token(
     await session.commit()
     
     return Token(
-        access_token=create_access_token(subject=user.id),
-        refresh_token=create_refresh_token(subject=user.id)
+        access_token=create_access_token(subject=str(user.id)),
+        refresh_token=create_refresh_token(subject=str(user.id))
+    )
+
+
+@router.post("/refresh", response_model=Token, summary="Обновить access token")
+async def refresh_access_token(
+    request: RefreshRequest,
+    session: AsyncSession = Depends(get_async_session),
+) -> Token:
+    """
+    Использует refresh token для получения новой пары токенов.
+    Не требует повторного ввода логина и пароля.
+    
+    - **refresh_token**: действующий refresh token (получен при логине)
+    
+    Возвращает новую пару access_token и refresh_token.
+    """
+    try:
+        # 1. Декодируем refresh token
+        payload = jwt.decode(
+            request.refresh_token,
+            settings.SECRET_KEY,
+            algorithms=[settings.ALGORITHM]
+        )
+        
+        user_id = payload.get("sub")
+        token_type = payload.get("type")
+        
+        # 2. Проверяем, что это именно refresh token
+        if token_type != "refresh":
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid token type"
+            )
+            
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Refresh token expired, please login again"
+        )
+    except jwt.InvalidTokenError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid refresh token"
+        )
+    
+    # 3. Находим пользователя в БД
+    result = await session.execute(
+        select(User).where(User.id == uuid.UUID(user_id))
+    )
+    user = result.scalar_one_or_none()
+    
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User not found"
+        )
+    
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User is inactive"
+        )
+    
+    # 4. Обновляем last_active_at (опционально)
+    user.last_active_at = datetime.now(timezone.utc)
+    session.add(user)
+    await session.commit()
+    
+    # 5. Выдаём новую пару токенов
+    return Token(
+        access_token=create_access_token(subject=str(user.id)),
+        refresh_token=create_refresh_token(subject=str(user.id))
     )

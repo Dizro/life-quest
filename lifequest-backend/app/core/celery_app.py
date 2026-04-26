@@ -30,5 +30,27 @@ celery_app.conf.update(
     }
 )
 
+celery_app.conf.beat_schedule = {
+    # Существующие задачи
+    'transition-overdue-tasks': {
+        'task': 'tasks.transition_overdue_tasks_to_trial',
+        'schedule': crontab(minute=1, hour=0),  # 00:01 каждый день
+    },
+    'reset-streaks': {
+        'task': 'tasks.reset_broken_streaks',
+        'schedule': crontab(minute=5, hour=0),  # 00:05 каждый день
+    },
+    
+    # ➕ Новая задача: проверка дедлайнов (каждый час)
+    'check-deadlines': {
+        'task': 'tasks.check_upcoming_deadlines',
+        'schedule': crontab(minute=0),  # каждый час в 00 минут
+        'options': {
+            'expires': 300,  # задача устаревает через 5 минут
+        }
+    },
+}
+
 # автоматическое обнаружение задач из модуля app.tasks.celery_tasks
 celery_app.autodiscover_tasks(["app.tasks"], related_name="celery_tasks")
+
