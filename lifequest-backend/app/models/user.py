@@ -13,7 +13,7 @@
 """
 
 from __future__ import annotations
-
+from app.models.device_token import DeviceToken 
 import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING, List, Optional
@@ -68,6 +68,12 @@ class User(Base):
         String(255),
         nullable=False,
         comment="хеш пароля (bcrypt / argon2)",
+    )
+    device_tokens: Mapped[list["DeviceToken"]] = relationship(
+        "DeviceToken",
+        back_populates="user",
+        cascade="all, delete-orphan",
+        lazy="selectin",
     )
 
     # ── профиль / RPG ───────────────────────────────────────
@@ -176,6 +182,20 @@ class User(Base):
         onupdate=func.now(),
         nullable=False,
         comment="дата последнего обновления (UTC)",
+    )
+    daily_xp: Mapped[int] = mapped_column(
+        Integer,
+        default=0,
+        server_default="0",
+        nullable=False,
+        comment="XP, накопленные сегодня (сбрасываются в 00:00 UTC)",
+    )
+    daily_gold: Mapped[int] = mapped_column(
+        Integer,
+        default=0,
+        server_default="0",
+        nullable=False,
+        comment="монеты, накопленные сегодня (сбрасываются в 00:00 UTC)",
     )
 
     # ── связи ────────────────────────────────────────────────

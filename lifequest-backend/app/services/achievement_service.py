@@ -12,7 +12,7 @@ from app.models.achievement import Achievement
 from app.models.user import User
 from app.models.user_achievement import UserAchievement
 from app.services.reward_service import apply_rewards_and_check_levelup
-
+from app.services.notification_service import send_achievement_notification
 
 async def check_and_grant_achievements(
     session: AsyncSession,
@@ -69,6 +69,7 @@ async def check_and_grant_achievements(
         session.add(user_ach)
         total_xp_bonus += ach.xp_bonus
         granted_codes.append(ach.code)
+        await send_achievement_notification(user, ach.title, ach.xp_bonus)
         
     # 4. Начисляем бонус (опционально может поднять уровень еще раз)
     if total_xp_bonus > 0:

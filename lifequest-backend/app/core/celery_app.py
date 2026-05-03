@@ -49,6 +49,13 @@ celery_app.conf.beat_schedule = {
             'expires': 300,  # задача устаревает через 5 минут
         }
     },
+    'reset-daily-limits': {
+        'task': 'tasks.reset_daily_limits',
+        'schedule': crontab(minute=0, hour=0),  # каждый день в 00:00 UTC
+        'options': {
+            'expires': 3600,  # задача устаревает через час
+        }
+    },
 }
 
 # автоматическое обнаружение задач из модуля app.tasks.celery_tasks

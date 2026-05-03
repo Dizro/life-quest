@@ -199,3 +199,39 @@ async def _check_upcoming_deadlines_async() -> dict:
                 logger.error(f"❌ Ошибка уведомления task={task.id}: {e}")
     
     return {"sent": sent_count, "errors": error_count}
+
+@celery_app.task(name="tasks.reset_daily_limits")
+def reset_daily_limits():
+    """
+    Синхронная версия без asyncio. Обнуляет daily_xp и daily_gold для всех пользователей.
+    """
+    from sqlalchemy import create_engine, text
+    from app.core.config import settings
+
+    # Берём синхронный URL (заменяем +asyncpg на +psycopg2)
+    sync_url = settings.DATABASE_URL.replace("+asyncpg", "").replace(
+        "postgresql+psycopg2", "postgresql"
+    )
+    engine = create_engine(sync_url)
+    try:
+        with engine.connect() as conn:
+            result = conn.execute(text("UPDATE users SET daily_xp = 0, daily_gold = 0"))
+            conn.commit()
+            rowcount = result.rowcount
+            logger.info(f"Reset daily limits: updated {rowcount} users")
+            return {"status": "ok", "updated": rowcount}
+    except Exception as e:
+        logger.error(f"Reset daily limits failed: {e}")
+        raise
+
+async def _reset_daily_limits_async():
+    async with async_session_factory() as session:
+        # Обнуляем значения для всех пользователей
+        await session.execute(
+            update(User).values(
+                daily_xp=0,
+                daily_gold=0
+            )
+        )
+        await session.commit()
+        logger.info("✅ Дневные лимиты сброшены для всех пользователей")
