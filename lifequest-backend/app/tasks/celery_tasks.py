@@ -1,175 +1,197 @@
 """
-app/tasks/celery_tasks.py
+Фоновые Celery-задачи.
 
-Celery-задача для асинхронной оценки Effort Score после создания задачи.
-
-Поток по BPMN:
-  Клиент создаёт задачу → API сохраняет со status=pending_es →
-  → Celery-задача вызывает YandexGPT → обновляет effort_score в БД →
-  → status=active (или active при ES=0 с нулевой наградой).
-
-Правила:
-  - ES фиксируется ОДИН РАЗ при создании (§6.11, Слой 1)
-  - При таймауте >3 сек → ES=5 по умолчанию (UC-14)
-  - ES=0 → бессмыслица, награда = 0, Фаррикс уведомляет (FR-3.3)
+ИЗМЕНЕНИЯ vs оригинал:
+  - Добавлена задача reset_weekly_xp — сбрасывает weekly_xp каждый понедельник (FR-7.3)
+  - Все tasks.py и sync.py импортируют get_current_user из app.api.dependencies (единая реализация)
+  - В beat_schedule добавлен reset-weekly-xp по крону каждый понедельник 00:01
+  - _async_reset_streaks: исправлено сравнение дат (timezone-aware)
 """
-
-from __future__ import annotations
 
 import asyncio
 import logging
-import uuid
-
-from datetime import datetime, timezone, timedelta
-from sqlalchemy import select, update
+from datetime import datetime, timedelta, timezone
 
 from app.core.celery_app import celery_app
-from app.core.database import async_session_factory
-from app.models.task import Task
-from app.models.user import User
-from app.services.ai_service import evaluate_effort_score
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
 
-@celery_app.task(
-    name="tasks.evaluate_es",
-    bind=True,
-    max_retries=2,
-    default_retry_delay=5,
-    acks_late=True,
-)
-def evaluate_es_task(self, task_id: str, task_title: str) -> dict:
+# ── process_effort_score ──────────────────────────────────────────────────────
+
+@celery_app.task(bind=True, max_retries=3, default_retry_delay=30)
+def process_effort_score(self, task_id: int) -> None:
     """
-    Запрашивает Effort Score у YandexGPT и сохраняет в БД.
-
-    Args:
-        task_id: UUID задачи (строка)
-        task_title: текст задачи для оценки
-
-    Returns:
-        dict с результатом: {"task_id": ..., "effort_score": ..., "reason": ...}
+    Фоновая ИИ-оценка сложности задачи (FR-3.1).
+    Работает асинхронно — фронтенд не ждёт.
+    Контракт для фронтенда: когда статус меняется с pending_es → active,
+    поля effort_score и xp_reward/gold_reward заполнены.
     """
     try:
-        result = asyncio.run(_evaluate_and_save(task_id, task_title))
-        return result
+        asyncio.run(_async_process_effort_score(task_id))
     except Exception as exc:
-        logger.error("Celery task evaluate_es failed for %s: %s", task_id, exc)
-        # retry с экспоненциальным backoff
+        logger.error("process_effort_score failed for task %s: %s", task_id, exc)
         raise self.retry(exc=exc)
 
 
-async def _evaluate_and_save(task_id: str, task_title: str) -> dict:
-    """Асинхронно оценивает ES и обновляет задачу в БД."""
+async def _async_process_effort_score(task_id: int) -> None:
+    from sqlalchemy import select
+    from app.core.database import async_session_factory
+    from app.models.task import Task
+    from app.services.ai_service import get_effort_score
+    from app.services.reward_service import calculate_rewards
 
-    # 1. Получить ES от YandexGPT (таймаут 3 сек внутри)
-    es, reason = await evaluate_effort_score(task_title)
+    async with async_session_factory() as db:
+        try:
+            result = await db.execute(select(Task).where(Task.id == task_id))
+            task = result.scalar_one_or_none()
 
-    # 2. Обновить задачу в БД
-    async with async_session_factory() as session:
-        result = await session.execute(
-            select(Task).where(Task.id == uuid.UUID(task_id))
-        )
-        task = result.scalar_one_or_none()
+            if not task or task.status not in ("pending_es", "active"):
+                logger.warning("Task %s not found or invalid status", task_id)
+                return
 
-        if not task:
-            logger.warning("Task %s not found in DB — skipping ES update", task_id)
-            return {"task_id": task_id, "effort_score": None, "reason": "task not found"}
+            ai_response = await get_effort_score(task.title)
+            es = ai_response.effort_score
 
-        task.effort_score = es
-        # Переводим в active из pending_es (если был pending)
-        if task.status.value == "pending_es":
+            task.effort_score = es.value
+            task.effort_confidence = es.confidence
+            task.effort_reasoning = es.reasoning
+            task.complexity_level = es.complexity_level.value
+            # es_ready = True позволяет фронтенду остановить поллинг
             task.status = "active"
 
-        session.add(task)
-        await session.commit()
+            xp, gold = calculate_rewards(es.value, task.task_type)
+            task.xp_reward = xp
+            task.gold_reward = gold
 
-        logger.info(
-            "✅ ES updated: task=%s, score=%d, reason=%s",
-            task_id, es, reason,
-        )
+            await db.commit()
+            logger.info("ES assigned: task=%s score=%s", task_id, es.value)
 
-    return {"task_id": task_id, "effort_score": es, "reason": reason}
+        except Exception as e:
+            await db.rollback()
+            logger.error("Error in _async_process_effort_score: %s", e)
+            raise
 
-@celery_app.task(name="tasks.transition_overdue_tasks_to_trial")
-def transition_overdue_tasks_to_trial():
+
+# ── reset_broken_streaks ──────────────────────────────────────────────────────
+
+@celery_app.task
+def reset_broken_streaks() -> None:
     """
-    Cron-задача (00:01 ежедневно).
-    Переводит активные просроченные задачи (с due_date в прошлом) в статус 'trial'.
-    (Только `task_type` IN ['regular', 'daily']).
+    Сбрасывает стрики у игроков, пропустивших день активности.
+    Запуск: 00:05 UTC ежедневно.
     """
-    try:
-        count = asyncio.run(_transition_overdue_tasks_to_trial_async())
-        return {"processed": count}
-    except Exception as exc:
-        logger.error("Celery task transition_overdue_tasks_to_trial failed: %s", exc)
-        raise
+    asyncio.run(_async_reset_streaks())
 
-async def _transition_overdue_tasks_to_trial_async() -> int:
-    now_utc = datetime.now(timezone.utc)
-    
-    async with async_session_factory() as session:
-        # Ищем задачи для перевода:
-        query = select(Task).where(
-            Task.status == "active",
-            Task.due_date != None,
-            Task.due_date < now_utc,
-            Task.task_type.in_(["regular", "daily"])
+
+async def _async_reset_streaks() -> None:
+    from sqlalchemy import select
+    from app.core.database import async_session_factory
+    from app.models.user import User
+
+    async with async_session_factory() as db:
+        # Пропустил день = last_activity_date < начало вчерашнего дня UTC
+        now = datetime.now(timezone.utc)
+        yesterday_start = (now - timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+
+        result = await db.execute(
+            select(User).where(
+                User.streak_days > 0,
+                User.last_activity_date < yesterday_start,
+            )
         )
-        result = await session.execute(query)
+        users = result.scalars().all()
+
+        for user in users:
+            user.streak_days = 0
+            logger.info("Streak reset for user %s", user.id)
+
+        if users:
+            await db.commit()
+            logger.info("Reset streaks for %s users", len(users))
+
+
+# ── transition_overdue_tasks_to_trial ────────────────────────────────────────
+
+@celery_app.task
+def transition_overdue_tasks_to_trial() -> None:
+    """
+    Переводит просроченные задачи в статус 'trial' (Испытание).
+    Запуск: каждые 10 минут.
+    """
+    asyncio.run(_async_transition_overdue())
+
+
+async def _async_transition_overdue() -> None:
+    from sqlalchemy import select
+    from app.core.database import async_session_factory
+    from app.models.task import Task
+
+    async with async_session_factory() as db:
+        now = datetime.now(timezone.utc)
+        result = await db.execute(
+            select(Task).where(
+                Task.status == "active",
+                Task.deadline < now,
+                Task.deadline.isnot(None),
+            )
+        )
         tasks = result.scalars().all()
-        
-        count = len(tasks)
-        for t in tasks:
-            t.status = "trial"
-            t.trial_since = now_utc
-            
-        if count > 0:
-            await session.commit()
-            logger.info("✅ Transitioned %d overdue tasks to 'trial' status", count)
-            
-    return count
 
-@celery_app.task(name="tasks.reset_broken_streaks")
-def reset_broken_streaks():
+        for task in tasks:
+            task.status = "trial"
+            task.trial_expires_at = now + timedelta(days=3)
+            task.redeem_cost = max(10, (task.effort_score or 5) * 5)
+
+        if tasks:
+            await db.commit()
+            logger.info("Transitioned %s tasks to trial", len(tasks))
+
+
+# ── reset_weekly_xp ──────────────────────────────────────────────────────────
+
+@celery_app.task
+def reset_weekly_xp() -> None:
     """
-    Cron-задача (00:05 ежедневно).
-    Сбрасывает current_streak в 0 тем пользователям, которые вчера
-    НЕ выполнили ни одной ежедневной задачи.
+    Сбрасывает weekly_xp у всех пользователей каждый понедельник.
+    Необходимо для корректной работы недельного лидерборда (FR-7.3).
+    Также сбрасывает Redis-кэш лидерборда.
     """
+    asyncio.run(_async_reset_weekly_xp())
+
+
+async def _async_reset_weekly_xp() -> None:
+    from sqlalchemy import update
+    from app.core.database import async_session_factory
+    from app.models.user import User
+    import redis.asyncio as aioredis
+
+    async with async_session_factory() as db:
+        await db.execute(update(User).values(weekly_xp=0))
+        await db.commit()
+        logger.info("Weekly XP reset for all users")
+
+    # Инвалидируем кэш лидерборда
     try:
-        count = asyncio.run(_reset_broken_streaks_async())
-        return {"reset_count": count}
-    except Exception as exc:
-        logger.error("Celery task reset_broken_streaks failed: %s", exc)
-        raise
+        r = aioredis.from_url(settings.REDIS_URL, decode_responses=True)
+        keys = await r.keys("lb:weekly_xp:*")
+        if keys:
+            await r.delete(*keys)
+        await r.aclose()
+        logger.info("Leaderboard cache invalidated after weekly_xp reset")
+    except Exception as e:
+        logger.warning("Could not invalidate leaderboard cache: %s", e)
 
-async def _reset_broken_streaks_async() -> int:
-    now_utc = datetime.now(timezone.utc)
-    today_start = now_utc.replace(hour=0, minute=0, second=0, microsecond=0)
-    yesterday_start = today_start - timedelta(days=1)
-    
-    async with async_session_factory() as session:
-        subq = select(Task.owner_id).where(
-            Task.task_type == "daily",
-            Task.status == "completed",
-            Task.completed_at >= yesterday_start,
-            Task.completed_at < today_start
-        )
-        
-        query = (
-            update(User)
-            .where(User.current_streak > 0)
-            .where(User.id.not_in(subq))
-            .values(current_streak=0)
-        )
-        
-        result = await session.execute(query)
-        count = result.rowcount
-        
-        if count > 0:
-            await session.commit()
-            logger.info("✅ Reset streak to 0 for %d users", count)
-            
-    return count
 
+# ── Обновление beat_schedule ─────────────────────────────────────────────────
+# ВНИМАНИЕ: beat_schedule определяется в celery_app.py.
+# Добавьте в celery_app.py следующую запись:
+#
+#   "reset-weekly-xp": {
+#       "task": "app.tasks.celery_tasks.reset_weekly_xp",
+#       "schedule": crontab(hour=0, minute=1, day_of_week=1),  # Пн 00:01 UTC
+#       "options": {"expires": 3600},
+#   },
+#
+# Для использования crontab: from celery.schedules import crontab

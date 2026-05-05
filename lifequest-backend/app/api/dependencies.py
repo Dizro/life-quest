@@ -1,65 +1,60 @@
-# app/api/dependencies.py
-import uuid
-import jwt
+"""
+Централизованные FastAPI-зависимости.
+
+ПРОБЛЕМА: В коде были два разных get_current_user:
+  - app.api.v1.auth.get_current_user  (используется в tasks.py, sync.py)
+  - app.api.dependencies.get_current_user  (используется в users.py)
+
+РЕШЕНИЕ: Единственная реализация здесь. Оба модуля должны импортировать отсюда.
+tasks.py и sync.py при этом нужно обновить импорт на: from app.api.dependencies import get_current_user
+"""
+
 from fastapi import Depends, HTTPException, status
-from fastapi.security import OAuth2PasswordBearer
-from sqlalchemy import select
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+from jose import JWTError, jwt
 
 from app.core.config import settings
-from app.core.database import get_async_session
+from app.core.database import get_db
 from app.models.user import User
-from app.schemas.token import TokenPayload
 
-# Указываем путь к эндпоинту авторизации для Swagger UI
-reusable_oauth2 = OAuth2PasswordBearer(
-    tokenUrl="/api/v1/auth/login"
-)
+security = HTTPBearer()
+
 
 async def get_current_user(
-    session: AsyncSession = Depends(get_async_session),
-    token: str = Depends(reusable_oauth2)
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: AsyncSession = Depends(get_db),
 ) -> User:
+    """
+    Извлекает пользователя из JWT access-токена.
+    Используется во всех защищённых эндпоинтах через Depends(get_current_user).
+    """
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Не удалось валидировать учетные данные (токен недействителен или истёк)",
+        detail="Не удалось подтвердить учётные данные",
         headers={"WWW-Authenticate": "Bearer"},
     )
-    
+
     try:
         payload = jwt.decode(
-            token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM]
+            credentials.credentials,
+            settings.SECRET_KEY,
+            algorithms=[settings.ALGORITHM],
         )
-        token_data = TokenPayload(**payload)
-        
-        # Проверяем, что нам передали именно access token, а не refresh
-        if token_data.type != "access":
+        user_id: str = payload.get("sub")
+        token_type: str = payload.get("type", "access")
+
+        if user_id is None or token_type != "access":
             raise credentials_exception
-            
-    except jwt.ExpiredSignatureError:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Срок действия токена истек",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    except jwt.PyJWTError:
+
+    except JWTError:
         raise credentials_exception
 
-    if token_data.sub is None:
-        raise credentials_exception
-
-    try:
-        user_uuid = uuid.UUID(token_data.sub)
-    except ValueError:
-        raise credentials_exception
-
-    # Ищем пользователя в БД
-    result = await session.execute(select(User).where(User.id == user_uuid))
+    result = await db.execute(select(User).where(User.id == int(user_id)))
     user = result.scalar_one_or_none()
 
-    if user is None:
+    if user is None or not user.is_active:
         raise credentials_exception
-    if not user.is_active:
-        raise HTTPException(status_code=400, detail="Аккаунт заблокирован")
-        
+
     return user

@@ -1,48 +1,37 @@
 """
-Асинхронный движок SQLAlchemy и фабрика сессий для PostgreSQL 15.
+Database engine, session factory, Base.
 
-Использование в эндпоинтах:
-    from app.core.database import get_async_session
-    async def endpoint(session: AsyncSession = Depends(get_async_session)):
-        ...
+ИСПРАВЛЕНИЕ: users.py импортирует get_async_session, а tasks.py / sync.py — get_db.
+Оба имени теперь указывают на одну и ту же функцию-генератор сессии.
 """
 
-from sqlalchemy.ext.asyncio import (
-    AsyncSession,
-    async_sessionmaker,
-    create_async_engine,
-)
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase
-
+from sqlalchemy.pool import NullPool
 from app.core.config import settings
+from typing import AsyncGenerator
 
-# ── движок (connection pool) ─────────────────────────────────
+
 engine = create_async_engine(
     settings.DATABASE_URL,
-    echo=settings.DEBUG,
-    pool_size=10,
-    max_overflow=20,
-    pool_pre_ping=True,          # переподключение при разрыве
-    pool_recycle=1800,            # пересоздание соединений каждые 30 мин
+    echo=False,
+    poolclass=NullPool,  # <--- Замените параметры пула на NullPool
 )
 
-# ── фабрика сессий ───────────────────────────────────────────
 async_session_factory = async_sessionmaker(
-    bind=engine,
+    engine,
     class_=AsyncSession,
     expire_on_commit=False,
+    autoflush=False,
 )
 
 
-# ── базовый класс для всех ORM-моделей ──────────────────────
 class Base(DeclarativeBase):
-    """декларативная база для наследования всеми моделями."""
     pass
 
 
-# ── зависимость FastAPI ──────────────────────────────────────
-async def get_async_session() -> AsyncSession:  # type: ignore[misc]
-    """отдаёт асинхронную сессию; коммитит при успехе, откатывает при ошибке."""
+async def get_db() -> AsyncGenerator[AsyncSession, None]:
+    """Dependency для FastAPI: открывает сессию, коммитит при успехе, откатывает при ошибке."""
     async with async_session_factory() as session:
         try:
             yield session
@@ -52,3 +41,7 @@ async def get_async_session() -> AsyncSession:  # type: ignore[misc]
             raise
         finally:
             await session.close()
+
+
+# Алиас — users.py импортирует get_async_session
+get_async_session = get_db

@@ -1,30 +1,27 @@
-"""Pydantic-схемы достижений."""
-
-from __future__ import annotations
-
-import uuid
-from datetime import datetime
+from pydantic import BaseModel
 from typing import Optional
-
-from pydantic import BaseModel, ConfigDict
-
-
-class AchievementRead(BaseModel):
-    """элемент каталога достижений."""
-    model_config = ConfigDict(from_attributes=True)
-
-    id: uuid.UUID
-    code: str
-    title: str
-    description: Optional[str]
-    icon_url: Optional[str]
-    xp_bonus: int
+from datetime import datetime
 
 
-class UserAchievementRead(BaseModel):
-    """достижение, разблокированное конкретным пользователем."""
-    model_config = ConfigDict(from_attributes=True)
+class AchievementResponse(BaseModel):
+    id: int
+    key: str
+    name: str
+    description: str
+    icon: str
+    crystal_reward: int
+    xp_reward: int
+    condition_type: str
+    condition_value: int
+    unlocked: bool
+    unlocked_at: Optional[datetime]
+    progress: Optional[float] = None  # 0.0 - 1.0
 
-    id: uuid.UUID
-    achievement: AchievementRead
-    unlocked_at: datetime
+    model_config = {"from_attributes": True}
+
+
+class AchievementsListResponse(BaseModel):
+    unlocked: list[AchievementResponse]
+    locked: list[AchievementResponse]
+    total_unlocked: int
+    total: int

@@ -1,156 +1,75 @@
-"""
-app/services/reward_service.py
-
-Сервисный слой начисления наград по формуле ТЗ §6.2:
-  XP   = ES × base_xp   × type_mult × status_mult × buff_mult
-  Gold = ES × base_gold × type_mult × status_mult × buff_mult
-
-Дневной потолок (§6.4):
-  daily_xp_cap   = 200 + (level × 20)
-  daily_gold_cap = 100 + (level × 10)
-"""
-
-from __future__ import annotations
-
+from typing import Tuple
+from app.models.user import User
+from app.models.task import Task
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from app.models.task import Task
-    from app.models.user import User
 
 
-# ── базовые множители по типу задачи ─────────────────────────────────────────
-
-_BASE_XP: dict[str, int] = {
-    "regular": 10,
-    "daily":   7,
-    "habit":   3,
-}
-
-_BASE_GOLD: dict[str, int] = {
-    "regular": 5,
-    "daily":   3,
-    "habit":   1,
-}
-
-# ── прогрессия уровней ────────────────────────────────────────────────────────
-
-def xp_required_for_level(level: int) -> int:
-    """XP_req(L) = 100 × L^1.5"""
-    return int(100 * (level ** 1.5))
+XP_PER_EFFORT_POINT = 10
+GOLD_PER_EFFORT_POINT = 4
+DAILY_XP_CAP_BASE = 200
+HABIT_DAILY_XP_CAP = 30
 
 
-# ── множители ─────────────────────────────────────────────────────────────────
-
-def _get_status_mult(task: "Task") -> float:
-    """
-    Множитель за статус «Испытание» (§6.6):
-      неделя 1 → 0.5, неделя 2 → 0.4, неделя 3 → 0.3, неделя 4+ → 0.2
-    """
-    if task.status.value != "trial" or not task.trial_since:
-        return 1.0
-
-    now = datetime.now(timezone.utc)
-    trial_since = task.trial_since
-    # приводим к offset-aware если нужно
-    if trial_since.tzinfo is None:
-        trial_since = trial_since.replace(tzinfo=timezone.utc)
-
-    weeks_overdue = (now - trial_since).days // 7
-    if weeks_overdue <= 1:
-        return 0.5
-    elif weeks_overdue == 2:
-        return 0.4
-    elif weeks_overdue == 3:
-        return 0.3
-    else:
-        return 0.2
-
-
-def _get_buff_mult(user: "User") -> float:
-    """
-    Активный XP-бафф пользователя (§6.8).
-    Берём максимальный из неистёкших XP-баффов; Gold-баффы не смешиваем.
-    """
-    now = datetime.now(timezone.utc)
-    xp_mults = []
-
-    for buff in (user.buffs or []):
-        expires = buff.expires_at
-        if expires.tzinfo is None:
-            expires = expires.replace(tzinfo=timezone.utc)
-        if expires > now and "xp" in buff.buff_type.lower():
-            xp_mults.append(float(buff.multiplier))
-
-    return max(xp_mults, default=1.0)
-
-
-# ── основной расчёт ───────────────────────────────────────────────────────────
-
-def calculate_rewards(
-    task: "Task", 
-    user: "User",
-    today_xp: int = 0,
-    today_gold: int = 0,
-    today_habit_xp: int = 0
-) -> tuple[int, int]:
-    """
-    Возвращает (xp_earned, gold_earned) с учётом всех множителей и дневного лимита.
-    Слой 2 защиты: дневной лимит агрегируется на основе переданных сумм за сегодня.
-    """
-    es: int = task.effort_score if task.effort_score is not None else 5
-    task_type: str = task.task_type.value if task.task_type else "regular"
-
-    base_xp   = _BASE_XP.get(task_type, 10)
-    base_gold = _BASE_GOLD.get(task_type, 5)
-
-    status_mult = _get_status_mult(task)
-    buff_mult   = _get_buff_mult(user)
-    type_mult   = 1.0  # зарезервировано для будущих модификаторов
-
-    raw_xp   = int(es * base_xp   * type_mult * status_mult * buff_mult)
-    raw_gold = int(es * base_gold * type_mult * status_mult * 1.0)  # Gold-бафф не влияет на это место
-
-    # Дневной потолок (FR-5.5)
-    daily_xp_cap   = 200 + (user.level * 20)
-    daily_gold_cap = 100 + (user.level * 10)
-    
-    # Отдельный лимит для привычек
+def calculate_rewards(effort_score: int, task_type: str = "regular") -> Tuple[int, int]:
+    """Возвращает (xp, gold) по effort score."""
+    xp = effort_score * XP_PER_EFFORT_POINT
+    gold = effort_score * GOLD_PER_EFFORT_POINT
     if task_type == "habit":
-        habit_cap = 30
-        available_habit_xp = max(0, habit_cap - today_habit_xp)
-        raw_xp = min(raw_xp, available_habit_xp)
-
-    available_xp = max(0, daily_xp_cap - today_xp)
-    available_gold = max(0, daily_gold_cap - today_gold)
-
-    xp_earned   = min(raw_xp, available_xp)
-    gold_earned = min(raw_gold, available_gold)
-
-    return xp_earned, gold_earned
+        xp = min(xp, HABIT_DAILY_XP_CAP)
+    return xp, gold
 
 
-# ── повышение уровня ──────────────────────────────────────────────────────────
-
-def apply_rewards_and_check_levelup(
-    user: "User",
-    xp_earned: int,
-    gold_earned: int,
-) -> bool:
+def apply_xp(user: User, raw_xp: int) -> Tuple[int, bool]:
     """
-    Начисляет XP и Gold пользователю, проверяет повышение уровня.
-    Возвращает True, если уровень повысился.
-    Мутирует объект user — вызывающая сторона должна сделать commit.
+    Применяет XP к игроку с учётом:
+    - ежедневного лимита
+    - множителя баффа
+    Возвращает (actual_xp_gained, leveled_up).
     """
-    user.experience_points += xp_earned
-    user.coins += gold_earned
+    now = datetime.now(timezone.utc)
+
+    # Сброс дневного счётчика
+    if user.daily_xp_reset_date is None or user.daily_xp_reset_date.date() < now.date():
+        user.daily_xp_earned = 0
+        user.daily_xp_reset_date = now
+
+    daily_cap = DAILY_XP_CAP_BASE + user.level * 20
+    available = daily_cap - user.daily_xp_earned
+    if available <= 0:
+        return 0, False
+
+    # Бафф множитель
+    if user.xp_multiplier_expires and user.xp_multiplier_expires > now:
+        raw_xp = int(raw_xp * user.xp_multiplier)
+
+    actual_xp = min(raw_xp, available)
+    user.xp += actual_xp
+    user.daily_xp_earned += actual_xp
 
     leveled_up = False
-    # цикл на случай нескольких уровней за раз (маловероятно, но правильно)
-    while user.experience_points >= xp_required_for_level(user.level):
+    while user.xp >= user.xp_to_next_level:
+        user.xp -= user.xp_to_next_level
         user.level += 1
-        user.crystals += user.level  # +N кристаллов = номер нового уровня (§6.5)
+        user.xp_to_next_level = int(user.xp_to_next_level * 1.5)
         leveled_up = True
 
-    return leveled_up
+    return actual_xp, leveled_up
+
+
+FARRIX_PHRASES = [
+    "Отличная работа, {name}! Каждый шаг приближает тебя к легенде.",
+    "Ещё одна победа! Ты растёшь быстрее, чем я ожидал, {name}.",
+    "Задача выполнена. Твоя дисциплина внушает уважение.",
+    "Превосходно! Стрик продолжается — не останавливайся, {name}.",
+    "Квест завершён. Фаррикс доволен твоим прогрессом."
+]
+
+def get_farrix_phrase(effort_score: int, leveled_up: bool, user_name: str = "искатель") -> str:
+    if leveled_up:
+        return f"🎉 УРОВЕНЬ ВВЕРХ! Ты становишься сильнее с каждым днём, {user_name}!"
+    if effort_score >= 15:
+        return f"Это был настоящий подвиг, {user_name}! Такие задачи закаляют героев."
+    if effort_score >= 10:
+        return f"Серьёзная работа позади. Ты справился — Фаррикс горд тобой, {user_name}."
+    import random
+    return random.choice(FARRIX_PHRASES).format(name=user_name)

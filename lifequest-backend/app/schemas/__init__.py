@@ -1,30 +1,19 @@
-"""app.schemas — Pydantic v2 контракты API (DTO запросов и ответов)."""
+# app/schemas/__init__.py
 
-from app.schemas.user import (           # noqa: F401
-    UserCreate,
-    UserRead,
-    UserUpdate,
-    UserProfile,
-)
-from app.schemas.task import (           # noqa: F401
-    TaskCreate,
-    TaskRead,
-    TaskUpdate,
-    TaskComplete,
-    TaskListResponse,
-)
-from app.schemas.achievement import (    # noqa: F401
-    AchievementRead,
-    UserAchievementRead,
-)
-from app.schemas.common import (         # noqa: F401
-    HealthResponse,
-    PaginationParams,
-    PaginatedResponse,
-    ErrorResponse,
-)
+from .task import TaskCreate, TaskUpdate, TaskResponse, TaskCompleteResponse
+from .ai import AIResponse, EffortScoreRequest, EffortScoreResponse
+from .sync import SyncRequest, SyncResponse, SyncActionResult
+from .profile import ProfileSettingsUpdate, ProfileSettingsResponse
+from .achievement import AchievementResponse, AchievementsListResponse
+from .equipment import EquipItemRequest, EquipItemResponse, InventoryResponse
+from .analytics import AnalyticsDashboardResponse
 
-from app.schemas.token import (          # noqa: F401
-    Token,
-    TokenPayload,
-)
+__all__ = [
+    "TaskCreate", "TaskUpdate", "TaskResponse", "TaskCompleteResponse",
+    "AIResponse", "EffortScoreRequest", "EffortScoreResponse",
+    "SyncRequest", "SyncResponse", "SyncActionResult",
+    "ProfileSettingsUpdate", "ProfileSettingsResponse",
+    "AchievementResponse", "AchievementsListResponse",
+    "EquipItemRequest", "EquipItemResponse", "InventoryResponse",
+    "AnalyticsDashboardResponse"
+]

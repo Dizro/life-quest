@@ -1,49 +1,38 @@
-"""
-Конфигурация приложения через pydantic-settings.
-Все переменные окружения валидируются при старте — если чего-то не хватает,
-приложение сразу упадёт с понятной ошибкой.
-"""
-
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings
+from functools import lru_cache
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(
-        env_file=".env",
-        env_file_encoding="utf-8",
-        case_sensitive=False,
-    )
+    # Database
+    DATABASE_URL: str = "postgresql+asyncpg://lifequest_user:lifequest_pass@db:5432/lifequest_db"
 
-    # ── PostgreSQL ──────────────────────────────────────────────
-    POSTGRES_USER: str = "lifequest_user"
-    POSTGRES_PASSWORD: str = "lifequest_pass"
-    POSTGRES_DB: str = "lifequest_db"
-    DATABASE_URL: str = (
-        "postgresql+asyncpg://lifequest_user:lifequest_pass@db:5432/lifequest_db"
-    )
+    # Redis / Celery
+    REDIS_URL: str = "redis://redis:6379/0"
 
-    # ── JWT Auth ───────────────────────────────────────────────
-    SECRET_KEY: str = "super-secret-key-change-it-in-production"
+    # JWT
+    SECRET_KEY: str = "super-secret-key-change-in-production-32chars"
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
 
-    @property
-    def DATABASE_URL_SYNC(self) -> str:
-        """синхронный URL для Alembic-миграций (psycopg2 вместо asyncpg)."""
-        return self.DATABASE_URL.replace("+asyncpg", "+psycopg2")
-
-    # ── Redis / Celery ─────────────────────────────────────────
-    REDIS_URL: str = "redis://redis:6379/0"
-
-    # ── Приложение ─────────────────────────────────────────────
-    APP_TITLE: str = "LifeQuest API"
-    APP_VERSION: str = "1.0.0"
-    DEBUG: bool = True
-
-    # ── YandexGPT (ИИ-оценка Effort Score, §7.1) ─────────────
+    # YandexGPT
     YANDEX_API_KEY: str = ""
     YANDEX_FOLDER_ID: str = ""
 
+    # AI timeouts and defaults
+    AI_TIMEOUT_SECONDS: int = 10
+    AI_DEFAULT_EFFORT_SCORE: int = 5
+    AI_DEFAULT_COMPLEXITY: str = "Medium"
+    AI_DEFAULT_REASONING: str = "Оценка по умолчанию (таймаут ИИ)"
 
-settings = Settings()
+    class Config:
+        env_file = ".env"
+        extra = "ignore"
+
+
+@lru_cache
+def get_settings() -> Settings:
+    return Settings()
+
+
+settings = get_settings()
