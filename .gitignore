@@ -17,3 +17,10 @@ env/
 *~
 .DS_Store
 Thumbs.db
+
+# Local scripts & reports
+maind.py
+generate_report.py
+result.txt
+celerybeat-schedule
+QA_REPORT.md
