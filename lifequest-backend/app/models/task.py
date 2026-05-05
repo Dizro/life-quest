@@ -1,240 +1,60 @@
-"""
-Модель Task (квест) — представляет задачу игрока.
-Таблица ``tasks``.
-
-Индексы:
-    - ix_tasks_owner_id
-    - ix_tasks_status
-    - ix_tasks_due_date
-    - ix_tasks_category
-    - ix_tasks_created_at
-
-Связи:
-    - owner  → User (многие-к-одному, back_populates="tasks")
-    - parent → Task (один-ко-многим, adjacency list)
-"""
-
-from __future__ import annotations
-
-import enum
-import uuid
-from datetime import datetime
-from typing import TYPE_CHECKING, Optional
-
-from sqlalchemy import (
-    DateTime,
-    Enum,
-    ForeignKey,
-    Integer,
-    String,
-    Text,
-    func,
-)
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import String, Integer, Boolean, Float, DateTime, Text, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-
+from sqlalchemy.sql import func
 from app.core.database import Base
+from datetime import datetime
+from typing import Optional
 
-if TYPE_CHECKING:
-    from app.models.user import User
-
-
-# ── перечисления ─────────────────────────────────────────────
-
-class TaskType(str, enum.Enum):
-    REGULAR = "regular"
-    DAILY = "daily"
-    HABIT = "habit"
-
-
-class TaskStatus(str, enum.Enum):
-    """жизненный цикл квеста."""
-    PENDING_ES = "pending_es"  # ожидает ИИ-оценки Effort Score
-    ACTIVE = "active"
-    COMPLETED = "completed"
-    TRIAL = "trial"
-    REDEEMED = "redeemed"
-    ARCHIVED = "archived"
-
-
-class TaskPriority(str, enum.Enum):
-    """редкость / приоритет квеста."""
-    COMMON = "common"         # обычная
-    UNCOMMON = "uncommon"     # необычная
-    RARE = "rare"             # редкая
-    EPIC = "epic"             # эпическая
-
-
-class TaskRecurrence(str, enum.Enum):
-    """паттерн повторения."""
-    NONE = "none"
-    DAILY = "daily"
-    WEEKLY = "weekly"
-    MONTHLY = "monthly"
-
-
-class TaskCategory(str, enum.Enum):
-    """категории — сферы жизни (маппятся на RPG-характеристики)."""
-    WORK = "work"             # интеллект
-    HEALTH = "health"         # сила
-    STUDY = "study"           # мудрость
-    CREATIVITY = "creativity" # харизма
-    FAMILY = "family"         # дух
-    OTHER = "other"
-
-
-# ── модель ───────────────────────────────────────────────────
 
 class Task(Base):
     __tablename__ = "tasks"
 
-    # ── первичный ключ ───────────────────────────────────────
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        primary_key=True,
-        default=uuid.uuid4,
-        server_default=func.gen_random_uuid(),
-        comment="уникальный идентификатор квеста (UUID v4)",
-    )
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id", ondelete="CASCADE"), index=True)
 
-    # ── внешний ключ ─────────────────────────────────────────
-    owner_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("users.id", ondelete="CASCADE"),
-        nullable=False,
-        index=True,
-        comment="FK → users.id",
-    )
-    parent_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("tasks.id", ondelete="SET NULL"),
-        nullable=True,
-        index=True,
-        comment="FK → tasks.id (подзадачи)",
-    )
+    title: Mapped[str] = mapped_column(String(500), nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
-    # ── основные поля ────────────────────────────────────────
-    title: Mapped[str] = mapped_column(
-        String(255),
-        nullable=False,
-        comment="название квеста",
-    )
-    description: Mapped[Optional[str]] = mapped_column(
-        Text,
-        nullable=True,
-        comment="расширенное описание (поддерживается markdown)",
-    )
+    # Type: regular | daily | habit
+    task_type: Mapped[str] = mapped_column(String(20), default="regular")
+    # Category: work | health | learn | personal
+    category: Mapped[str] = mapped_column(String(30), default="personal")
 
-# ── RPG-атрибуты ─────────────────────────────────────────
+    # Status: pending_es | active | completed | trial | archived | failed
+    status: Mapped[str] = mapped_column(String(20), default="pending_es", index=True)
 
-    effort_score: Mapped[Optional[int]] = mapped_column(
-        Integer, nullable=True, comment="оценка сложности от ИИ (0–10)"
-    )
-    task_type: Mapped[TaskType] = mapped_column(
-        Enum(TaskType, name="task_type", values_callable=lambda obj: [e.value for e in obj]),
-        default=TaskType.REGULAR,
-        server_default=TaskType.REGULAR.value,
-        nullable=False,
-        comment="тип задачи: regular/daily/habit",
-    )
-    status: Mapped[TaskStatus] = mapped_column(
-        Enum(TaskStatus, name="task_status", values_callable=lambda obj: [e.value for e in obj], create_constraint=True),
-        default=TaskStatus.ACTIVE,
-        server_default=TaskStatus.ACTIVE.value,
-        nullable=False,
-        index=True,
-        comment="текущий статус квеста",
-    )
-    priority: Mapped[TaskPriority] = mapped_column(
-        Enum(TaskPriority, name="task_priority", values_callable=lambda obj: [e.value for e in obj], create_constraint=True),
-        default=TaskPriority.COMMON,
-        server_default=TaskPriority.COMMON.value,
-        nullable=False,
-        comment="редкость / приоритет",
-    )
-    category: Mapped[TaskCategory] = mapped_column(
-        Enum(TaskCategory, name="task_category", values_callable=lambda obj: [e.value for e in obj], create_constraint=True),
-        default=TaskCategory.OTHER,
-        server_default=TaskCategory.OTHER.value,
-        nullable=False,
-        index=True,
-        comment="категория — сфера жизни",
-    )
-    recurrence: Mapped[TaskRecurrence] = mapped_column(
-        Enum(TaskRecurrence, name="task_recurrence", values_callable=lambda obj: [e.value for e in obj], create_constraint=True),
-        default=TaskRecurrence.NONE,
-        server_default=TaskRecurrence.NONE.value,
-        nullable=False,
-        comment="паттерн повторения",
-    )
+    # AI Effort Score (SCRUM-212)
+    effort_score: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    effort_confidence: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    effort_reasoning: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    complexity_level: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)  # Low|Medium|High|Epic
 
-    # ── награды ──────────────────────────────────────────────
-    xp_reward: Mapped[int] = mapped_column(
-        Integer,
-        default=10,
-        server_default="10",
-        nullable=False,
-        comment="ОП за выполнение",
-    )
-    coin_reward: Mapped[int] = mapped_column(
-        Integer,
-        default=1,
-        server_default="1",
-        nullable=False,
-        comment="монеты за выполнение",
-    )
+    # Rewards (calculated from effort_score)
+    xp_reward: Mapped[int] = mapped_column(Integer, default=0)
+    gold_reward: Mapped[int] = mapped_column(Integer, default=0)
 
-    # ── даты ─────────────────────────────────────────────────
-    due_date: Mapped[Optional[datetime]] = mapped_column(
-        DateTime(timezone=True),
-        nullable=True,
-        index=True,
-        comment="дедлайн квеста",
-    )
-    completed_at: Mapped[Optional[datetime]] = mapped_column(
-        DateTime(timezone=True),
-        nullable=True,
-        comment="когда квест был выполнен",
-    )
-    trial_since: Mapped[Optional[datetime]] = mapped_column(
-        DateTime(timezone=True),
-        nullable=True,
-        index=True,
-        comment="дата перехода в статус испытания",
-    )
+    # Anticheating
+    is_duplicate_blocked: Mapped[bool] = mapped_column(Boolean, default=False)
+    completion_count: Mapped[int] = mapped_column(Integer, default=0)  # for habits
 
-    # ── временные метки ──────────────────────────────────────
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        server_default=func.now(),
-        nullable=False,
-        index=True,
-        comment="дата создания записи (UTC)",
-    )
+    # Deadlines
+    deadline: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    # Offline sync (SCRUM-207)
+    client_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True, unique=True)
+    created_offline: Mapped[bool] = mapped_column(Boolean, default=False)
+    client_created_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    # Trial
+    trial_expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    redeem_cost: Mapped[int] = mapped_column(Integer, default=0)
+
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        server_default=func.now(),
-        onupdate=func.now(),
-        nullable=False,
-        comment="дата последнего обновления (UTC)",
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
-    # ── связи ────────────────────────────────────────────────
-    owner: Mapped[User] = relationship(
-        "User",
-        back_populates="tasks",
-        lazy="joined",
-    )
-    children: Mapped[list[Task]] = relationship(
-        "Task",
-        back_populates="parent",
-        cascade="all, delete-orphan",
-    )
-    parent: Mapped[Optional[Task]] = relationship(
-        "Task",
-        back_populates="children",
-        remote_side=[id],
-    )
-
-    def __repr__(self) -> str:
-        return f"<Task {self.title!r} status={self.status.value}>"
+    # Relationships
+    user: Mapped["User"] = relationship("User", back_populates="tasks")

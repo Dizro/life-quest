@@ -10,12 +10,10 @@
 
 from __future__ import annotations
 
-import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import DateTime, ForeignKey, Numeric, String, func
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import DateTime, ForeignKey, Numeric, String, func, Integer
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -27,15 +25,16 @@ if TYPE_CHECKING:
 class UserBuff(Base):
     __tablename__ = "user_buffs"
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+    # ИСПРАВЛЕНО: Теперь id — это целое число (Integer), автоинкремент
+    id: Mapped[int] = mapped_column(
+        Integer,
         primary_key=True,
-        default=uuid.uuid4,
-        server_default=func.gen_random_uuid(),
+        index=True,
     )
 
-    user_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+    # ИСПРАВЛЕНО: user_id теперь тоже целое число, чтобы совпадать с users.id
+    user_id: Mapped[int] = mapped_column(
+        Integer,
         ForeignKey("users.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
