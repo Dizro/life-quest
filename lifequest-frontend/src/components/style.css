@@ -1,0 +1,39 @@
+:root {
+  --bg-primary: #422974;
+  --bg-secondary: #F9F9FA;
+  --bg-tertiary: #3B72A9;
+  --text-primary: #000000;
+  --text-secondary: #F9F9FA;
+  --text-tertiary: #BCA9FF;
+  --border-color: #553496;
+  --card-bg: #F9F9FA;
+  --card-shadow: 0 10px 30px rgba(0, 0, 0, 0.08);
+  --gradient-start: #F9F9FA;
+  --gradient-end: #422974;
+  --success: #48bb78;
+  --warning: #ed8936;
+  --danger: #f56565;
+  --input-bg: #ffffff;
+  --input-border: #e0e0e0;
+  --button: #9864FF;
+}
+
+:root.dark {
+  --bg-primary: #4C3087;
+  --bg-secondary: #131313;
+  --bg-tertiary: #3B72A9;
+  --text-primary: #F9F9FA;
+  --text-secondary: #131313;
+  --text-tertiary: #1B0370;
+  --border-color: #693BC7;
+  --card-bg: #2C292D;
+  --card-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+  --gradient-start: #131313;
+  --gradient-end: #4C3087;
+  --success: #48bb78;
+  --warning: #ed8936;
+  --danger: #f56565;
+  --input-bg: #1F1D20;
+  --input-border: #131313;
+  --button: #9864FF;
+}

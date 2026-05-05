@@ -1,0 +1,22 @@
+@import "tailwindcss";
+
+@theme {
+  /* Colors */
+  --color-life-purple: #432874;
+  --color-life-purple-dark: #2a154a;
+  --color-life-pink: #bda8ff;
+  --color-text-inactive: #d5c8ff;
+  --color-bg-primary: #422974;
+  --color-bg-secondary: #F9F9FA;
+  --color-border-color: #553496;
+
+  /* Fonts */
+  --font-intro: "Intro Black", Helvetica, sans-serif;
+  --font-varela: "Varela Round", sans-serif;
+  --font-nunito: "Nunito", sans-serif;
+  --font-roboto: "Roboto", sans-serif;
+}
+
+body {
+  font-family: var(--font-roboto);
+}
