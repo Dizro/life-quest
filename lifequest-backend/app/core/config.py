@@ -5,6 +5,7 @@
 """
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from typing import Optional
 
 
 class Settings(BaseSettings):
@@ -44,6 +45,7 @@ class Settings(BaseSettings):
     # ── YandexGPT (ИИ-оценка Effort Score, §7.1) ─────────────
     YANDEX_API_KEY: str = ""
     YANDEX_FOLDER_ID: str = ""
+    FIREBASE_CREDENTIALS_PATH: Optional[str] = None
 
 
 settings = Settings()

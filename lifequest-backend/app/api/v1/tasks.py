@@ -7,7 +7,7 @@ import uuid
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status, Request
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -16,13 +16,16 @@ from app.models.task import Task
 from app.models.user import User
 from app.schemas.task import (
     TaskCreate, TaskRead, TaskUpdate, TaskComplete, TaskListResponse,
-    TaskStatusEnum, TaskCategoryEnum
+    SubtaskCreate, TaskStatusEnum, TaskCategoryEnum
 )
+
 from app.api.dependencies import get_current_user
 from app.services.reward_service import calculate_rewards, apply_rewards_and_check_levelup
 from app.services.achievement_service import check_and_grant_achievements
 from app.services.ai_service import should_reevaluate
 from app.tasks.celery_tasks import evaluate_es_task
+
+from app.core.limiter import limiter
 
 router = APIRouter()
 
@@ -73,7 +76,9 @@ async def list_tasks(
         "Задача сохраняется сразу, ES придёт через Celery-воркер (≤3 сек)."
     ),
 )
+@limiter.limit("100/minute")
 async def create_task(
+    request: Request,
     body: TaskCreate,
     session: AsyncSession = Depends(get_async_session),
     current_user: User = Depends(get_current_user)
@@ -152,6 +157,83 @@ async def get_task(
         raise HTTPException(status_code=404, detail="Квест не найден или у вас нет доступа")
     return task
 
+@router.post(
+    "/{task_id}/subtasks",
+    response_model=TaskRead,
+    status_code=status.HTTP_201_CREATED,
+    summary="Создать подзадачу",
+    description="Добавляет подзадачу к существующему квесту (родительской задаче)."
+)
+async def create_subtask(
+    task_id: uuid.UUID,
+    body: SubtaskCreate,
+    session: AsyncSession = Depends(get_async_session),
+    current_user: User = Depends(get_current_user),
+) -> TaskRead:
+    # Проверяем, существует ли родительская задача
+    parent_result = await session.execute(
+        select(Task).where(Task.id == task_id, Task.owner_id == current_user.id)
+    )
+    parent = parent_result.scalar_one_or_none()
+    if not parent:
+        raise HTTPException(status_code=404, detail="Родительский квест не найден")
+
+    # Запрещаем создание подзадач для уже завершённых или архивных задач
+    if parent.status.value in ("completed", "redeemed", "archived"):
+        raise HTTPException(
+            status_code=400,
+            detail="Нельзя добавить подзадачу к завершённому или архивному квесту"
+        )
+
+    # Проверка на максимальную глубину вложенности (допустим один уровень)
+    if parent.parent_id is not None:
+        raise HTTPException(
+            status_code=400,
+            detail="Подзадача не может иметь свои подзадачи (поддерживается только один уровень вложенности)"
+        )
+
+    # Создаём подзадачу
+    new_subtask = Task(
+        owner_id=current_user.id,
+        parent_id=parent.id,
+        title=body.title,
+        description=body.description,
+        task_type=body.task_type.value,
+        priority=body.priority.value,
+        category=body.category.value,
+        recurrence=body.recurrence.value,
+        xp_reward=body.xp_reward,
+        coin_reward=body.coin_reward,
+        due_date=body.due_date,
+        effort_score=None,          # будет оценён Celery-воркером
+        status="pending_es",
+    )
+    session.add(new_subtask)
+    await session.commit()
+    await session.refresh(new_subtask)
+
+    # Запускаем асинхронную оценку ES (если нужно)
+    from app.tasks.celery_tasks import evaluate_es_task
+    evaluate_es_task.delay(str(new_subtask.id), new_subtask.title)
+
+    return new_subtask
+
+@router.get(
+    "/{task_id}/subtasks",
+    response_model=list[TaskRead],
+    summary="Получить подзадачи",
+    description="Возвращает все подзадачи указанного квеста."
+)
+async def get_subtasks(
+    task_id: uuid.UUID,
+    session: AsyncSession = Depends(get_async_session),
+    current_user: User = Depends(get_current_user),
+) -> list[TaskRead]:
+    result = await session.execute(
+        select(Task).where(Task.parent_id == task_id, Task.owner_id == current_user.id)
+    )
+    subtasks = result.scalars().all()
+    return subtasks
 
 @router.patch(
     "/{task_id}",
@@ -237,7 +319,9 @@ async def delete_task(
         "Проверяет повышение уровня. Нельзя выполнить уже выполненный или архивный квест."
     ),
 )
+@limiter.limit("100/minute")
 async def complete_task(
+    request: Request,
     task_id: uuid.UUID,
     session: AsyncSession = Depends(get_async_session),
     current_user: User = Depends(get_current_user),
@@ -319,6 +403,44 @@ async def complete_task(
             current_user.current_streak += 1
             if current_user.current_streak > current_user.best_streak:
                 current_user.best_streak = current_user.current_streak
+    
+    # Если завершённая задача является подзадачей (имеет parent_id)
+    if task.parent_id is not None:
+        # Загружаем родительскую задачу
+        parent_result = await session.execute(
+            select(Task).where(Task.id == task.parent_id, Task.owner_id == current_user.id)
+        )
+        parent = parent_result.scalar_one_or_none()
+        
+        if parent and parent.status.value not in ("completed", "redeemed", "archived"):
+            # Загружаем все подзадачи этой родительской задачи
+            subtasks_result = await session.execute(
+                select(Task).where(Task.parent_id == parent.id)
+            )
+            all_subtasks = subtasks_result.scalars().all()
+            
+            # Проверяем, все ли подзадачи уже имеют статус "completed"
+            all_completed = all(st.status == "completed" for st in all_subtasks)
+            
+            if all_completed:
+                # Суммируем XP и Gold всех подзадач
+                total_xp = sum(st.xp_reward for st in all_subtasks)
+                total_gold = sum(st.coin_reward for st in all_subtasks)
+                
+                # Бонус = 20% от суммы
+                bonus_xp = int(total_xp * 0.2)
+                bonus_gold = int(total_gold * 0.2)
+                
+                # Завершаем родительскую задачу
+                parent.status = "completed"
+                parent.completed_at = datetime.now(timezone.utc)
+                parent.xp_reward = bonus_xp
+                parent.coin_reward = bonus_gold
+                session.add(parent)
+                
+                # Добавляем бонус к награде текущего выполнения (чтобы пользователь его получил)
+                xp_earned += bonus_xp
+                gold_earned += bonus_gold
 
     # ── начислить награду и проверить уровень ─────────────────────────────────
     leveled_up = apply_rewards_and_check_levelup(current_user, xp_earned, gold_earned)
@@ -411,4 +533,4 @@ async def redeem_task(
         "redeemed": True,
         "cost": cost,
         "remaining_coins": current_user.coins
-    }
+    }

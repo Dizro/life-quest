@@ -52,6 +52,8 @@ class TaskCategoryEnum(str, Enum):
     OTHER = "other"
 
 
+
+
 # ── запросы ───────────────────────────────────────────────────────────────────
 
 class TaskCreate(BaseModel):
@@ -133,6 +135,17 @@ class TaskComplete(BaseModel):
         description="Комментарий ИИ-наставника при завершении",
     )
 
+class SubtaskCreate(BaseModel):
+    """Схема создания подзадачи."""
+    title: str = Field(..., min_length=1, max_length=255, description="Название подзадачи")
+    description: Optional[str] = Field(None, max_length=4000)
+    task_type: TaskTypeEnum = Field(default=TaskTypeEnum.REGULAR)
+    priority: TaskPriorityEnum = Field(default=TaskPriorityEnum.COMMON)
+    category: TaskCategoryEnum = Field(default=TaskCategoryEnum.OTHER)
+    recurrence: TaskRecurrenceEnum = Field(default=TaskRecurrenceEnum.NONE)
+    due_date: Optional[datetime] = None
+    xp_reward: int = Field(default=10, ge=0, le=1000)
+    coin_reward: int = Field(default=5, ge=0, le=500)
 
 # ── ответы ────────────────────────────────────────────────────────────────────
 
