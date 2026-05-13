@@ -46,7 +46,7 @@
 
 <script>
 import { useAuthStore } from '@/stores/auth'
-import { tasksApi } from '@/services/api'
+import { shopApi } from '@/services/api'
 
 export default {
   name: 'ShopPage',
@@ -94,30 +94,24 @@ export default {
     async buyItem(item) {
       this.error = null
       this.successMsg = null
-      
-      // Check funds locally first to avoid unnecessary requests
-      if (item.priceGold > this.authStore.gold) {
+
+      if (item.priceGold > 0 && item.priceGold > this.authStore.gold) {
         this.error = 'Недостаточно золота!'
         return
       }
-      if (item.priceCrystal > this.authStore.crystals) {
+      if (item.priceCrystal > 0 && item.priceCrystal > this.authStore.crystals) {
         this.error = 'Недостаточно кристаллов!'
         return
       }
 
       this.loading = true
       try {
-        // Mock API call for MVP
-        // await axios.post('/api/v1/shop/buy', { item_id: item.id })
-        
-        // Update local store
-        this.authStore.user.coins -= item.priceGold
-        // this.authStore.user.crystals -= item.priceCrystal // if crystals existed in user object
-        
-        this.successMsg = `Вы успешно купили: ${item.name}!`
+        const res = await shopApi.buy(item.id)
+        this.successMsg = res.message
+        await this.authStore.fetchProfile()
         setTimeout(() => { this.successMsg = null }, 3000)
       } catch (err) {
-        this.error = err?.response?.data?.detail || 'Ошибка при покупке (INSUFFICIENT_FUNDS)'
+        this.error = err?.detail || 'Ошибка при покупке'
       } finally {
         this.loading = false
       }
@@ -319,4 +313,25 @@ export default {
 
 .price.gold { color: #d69e2e; }
 .price.crystal { color: #3182ce; }
+
+/* ─── Адаптив ─── */
+@media (max-width: 768px) {
+  .shop-page { padding: 24px 16px; }
+  .page-title { font-size: 28px; }
+  .tab-bar { flex-wrap: wrap; }
+  .tab-btn { padding: 10px 16px; font-size: 13px; }
+  .shop-grid { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 14px; }
+}
+
+@media (max-width: 480px) {
+  .shop-page { padding: 16px 12px; }
+  .page-title { font-size: 24px; }
+  .tab-btn { padding: 8px 12px; }
+  .tab-label { font-size: 12px; }
+  .shop-grid { grid-template-columns: 1fr 1fr; gap: 10px; }
+  .shop-card { padding: 12px; border-radius: 14px; }
+  .item-image-wrapper { height: 100px; padding: 10px; border-radius: 10px; }
+  .item-name { font-size: 14px; }
+  .item-desc { font-size: 11px; }
+}
 </style>

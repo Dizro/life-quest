@@ -21,7 +21,7 @@
             <div class="overview-item">
               <span class="o-icon">⚔️</span>
               <div class="o-info">
-                <span class="o-value">124</span>
+                <span class="o-value">{{ totalCompleted }}</span>
                 <span class="o-label">Задач выполнено</span>
               </div>
             </div>
@@ -81,6 +81,7 @@
 
 <script>
 import { useAuthStore } from '@/stores/auth'
+import { analyticsApi } from '@/services/api'
 
 export default {
   name: 'StatisticsPage',
@@ -90,42 +91,56 @@ export default {
   },
   data() {
     return {
-      // Mock Data for MVP
-      weeklyData: [
-        { label: 'Пн', xp: 120, percent: 40 },
-        { label: 'Вт', xp: 250, percent: 80 },
-        { label: 'Ср', xp: 300, percent: 100 },
-        { label: 'Чт', xp: 50,  percent: 20 },
-        { label: 'Пт', xp: 180, percent: 60 },
-        { label: 'Сб', xp: 210, percent: 70 },
-        { label: 'Вс', xp: 90,  percent: 30 },
-      ],
+      totalCompleted: 0,
+      maxStreak: 0,
+      weeklyData: [],
       heatmapData: []
     }
   },
-  created() {
-    this.generateHeatmap()
+  async created() {
+    await this.loadDashboard()
   },
   methods: {
-    generateHeatmap() {
-      // Generate 30 days of mock data
-      const data = []
-      const today = new Date()
-      for (let i = 29; i >= 0; i--) {
-        const d = new Date(today)
-        d.setDate(d.getDate() - i)
-        data.push({
-          date: d.toLocaleDateString(),
-          count: Math.floor(Math.random() * 8) // 0 to 7 tasks
+    async loadDashboard() {
+      try {
+        const data = await analyticsApi.getDashboard()
+
+        this.totalCompleted = data.overview?.total_tasks_completed || 0
+        this.maxStreak = data.overview?.max_streak || 0
+
+        // XP chart → last 7 days for bar chart
+        const chart = data.xp_chart || []
+        const last7 = chart.slice(-7)
+        const dayNames = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб']
+        const maxXp = Math.max(...last7.map(d => d.xp), 1)
+        this.weeklyData = last7.map(d => {
+          const dt = new Date(d.date)
+          return {
+            label: dayNames[dt.getDay()],
+            xp: d.xp,
+            percent: Math.round((d.xp / maxXp) * 100)
+          }
         })
+
+        // Heatmap from API (last 30 days)
+        const heatmap = data.heatmap || []
+        const last30 = heatmap.slice(-30)
+        this.heatmapData = last30.map(h => ({
+          date: h.date,
+          count: h.value
+        }))
+      } catch (err) {
+        console.error('Dashboard load error:', err)
+        // Fallback: empty data
+        this.weeklyData = []
+        this.heatmapData = []
       }
-      this.heatmapData = data
     },
     getHeatmapClass(count) {
       if (count === 0) return 'level-0'
-      if (count <= 2) return 'level-1'
-      if (count <= 4) return 'level-2'
-      if (count <= 6) return 'level-3'
+      if (count <= 1) return 'level-1'
+      if (count <= 2) return 'level-2'
+      if (count <= 3) return 'level-3'
       return 'level-4'
     }
   }
@@ -356,5 +371,16 @@ export default {
   .overview-card, .heatmap-card, .chart-card {
     grid-column: span 1;
   }
+  .statistics-page { padding: 24px 16px; }
+  .page-title { font-size: 28px; }
+  .overview-stats { flex-wrap: wrap; }
+}
+
+@media (max-width: 480px) {
+  .statistics-page { padding: 16px 12px; }
+  .page-title { font-size: 24px; }
+  .stat-card { padding: 16px; border-radius: 16px; }
+  .card-title { font-size: 16px; }
+  .o-value { font-size: 22px; }
 }
 </style>

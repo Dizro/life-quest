@@ -1,6 +1,12 @@
 <template>
   <header class="lq-header">
     <div class="header-inner">
+      <button class="burger-btn" @click="mobileMenuOpen = !mobileMenuOpen" aria-label="Меню">
+        <span class="burger-line" :class="{ open: mobileMenuOpen }"></span>
+        <span class="burger-line" :class="{ open: mobileMenuOpen }"></span>
+        <span class="burger-line" :class="{ open: mobileMenuOpen }"></span>
+      </button>
+
       <router-link to="/mainpage" class="logo">LifeQuest</router-link>
 
       <nav class="nav-links">
@@ -8,28 +14,28 @@
         <router-link to="/shop">Магазин</router-link>
         <router-link to="/groups">Группы</router-link>
         <router-link to="/statistics">Статистика</router-link>
-        <router-link to="/chat" class="text-[#fdd243] font-bold">Фаррикс 🧙</router-link>
+        <router-link to="/chat" class="farryx-link">Фаррикс 🧙</router-link>
       </nav>
 
       <div class="header-right">
-        <div class="stat-chip" title="Золото">
+        <div class="stat-chip hide-mobile" title="Золото">
           <span class="stat-icon">💰</span>
           <span class="stat-val">{{ authStore.gold }}</span>
         </div>
-        <div class="stat-chip" title="Кристаллы">
+        <div class="stat-chip hide-mobile" title="Кристаллы">
           <span class="stat-icon">💎</span>
           <span class="stat-val">{{ authStore.crystals }}</span>
         </div>
-        <div class="stat-chip streak-chip" title="Стрик" v-if="authStore.streakDays >= 3">
+        <div class="stat-chip streak-chip hide-mobile" title="Стрик" v-if="authStore.streakDays >= 3">
           <span class="stat-icon">🔥</span>
           <span class="stat-val">{{ authStore.streakDays }}</span>
         </div>
-        <div class="stat-chip" title="Опыт">
+        <div class="stat-chip hide-tablet" title="Опыт">
           <span class="stat-icon">✨</span>
           <span class="stat-val">{{ authStore.userXP }}</span>
         </div>
 
-        <button class="icon-btn" @click="handleMessages" title="Сообщения">
+        <button class="icon-btn hide-mobile" @click="handleMessages" title="Сообщения">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
             <path d="M20 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 4l-8 5-8-5V6l8 5 8-5v2z"/>
           </svg>
@@ -38,7 +44,7 @@
         <div class="user-menu" @click="toggleDropdown" ref="menuRef">
           <div class="avatar-circle">{{ userInitial }}</div>
           <span class="username-label">{{ authStore.displayName }}</span>
-          <span class="caret" :class="{ open: dropdownOpen }">▾</span>
+          <span class="caret" :class="{ open: dropdownOpen }">&#x25be;</span>
 
           <Transition name="dropdown-fade">
             <div v-if="dropdownOpen" class="dropdown-panel" @click.stop>
@@ -82,6 +88,28 @@
         </div>
       </div>
     </div>
+
+    <!-- Mobile drawer -->
+    <Transition name="drawer-fade">
+      <div v-if="mobileMenuOpen" class="mobile-overlay" @click="mobileMenuOpen = false"></div>
+    </Transition>
+    <Transition name="drawer-slide">
+      <nav v-if="mobileMenuOpen" class="mobile-drawer">
+        <div class="mobile-stats">
+          <div class="stat-chip"><span class="stat-icon">💰</span><span class="stat-val">{{ authStore.gold }}</span></div>
+          <div class="stat-chip"><span class="stat-icon">💎</span><span class="stat-val">{{ authStore.crystals }}</span></div>
+          <div class="stat-chip" v-if="authStore.streakDays >= 3"><span class="stat-icon">🔥</span><span class="stat-val">{{ authStore.streakDays }}</span></div>
+          <div class="stat-chip"><span class="stat-icon">✨</span><span class="stat-val">{{ authStore.userXP }}</span></div>
+        </div>
+        <div class="mobile-nav-links">
+          <router-link to="/mainpage" @click="mobileMenuOpen = false">Главная</router-link>
+          <router-link to="/shop" @click="mobileMenuOpen = false">Магазин</router-link>
+          <router-link to="/groups" @click="mobileMenuOpen = false">Группы</router-link>
+          <router-link to="/statistics" @click="mobileMenuOpen = false">Статистика</router-link>
+          <router-link to="/chat" @click="mobileMenuOpen = false" class="farryx-link">Фаррикс 🧙</router-link>
+        </div>
+      </nav>
+    </Transition>
   </header>
 </template>
 
@@ -96,7 +124,8 @@ export default {
   },
   data() {
     return {
-      dropdownOpen: false
+      dropdownOpen: false,
+      mobileMenuOpen: false
     }
   },
   computed: {
@@ -129,6 +158,11 @@ export default {
     logout() {
       this.authStore.logout()
       this.$router.push('/')
+    }
+  },
+  watch: {
+    '$route'() {
+      this.mobileMenuOpen = false
     }
   }
 }
@@ -365,6 +399,78 @@ export default {
 .logout-item { color: #e53e3e; }
 .logout-item:hover { background: #fff5f5; color: #c53030; }
 
+/* Burger button - hidden on desktop */
+.burger-btn {
+  display: none;
+  flex-direction: column;
+  gap: 4px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 6px;
+  z-index: 10;
+}
+.burger-line {
+  width: 22px;
+  height: 2px;
+  background: #d5c8ff;
+  border-radius: 2px;
+  transition: transform 0.25s, opacity 0.25s;
+}
+.burger-line.open:nth-child(1) { transform: translateY(6px) rotate(45deg); }
+.burger-line.open:nth-child(2) { opacity: 0; }
+.burger-line.open:nth-child(3) { transform: translateY(-6px) rotate(-45deg); }
+
+/* Farryx link special color */
+.farryx-link { color: #fdd243 !important; font-weight: 700 !important; }
+
+/* Mobile drawer */
+.mobile-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.5);
+  z-index: 998;
+}
+.mobile-drawer {
+  display: none;
+  position: fixed;
+  top: 67px;
+  left: 0;
+  right: 0;
+  background: #3a2063;
+  z-index: 999;
+  padding: 16px 20px 20px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+  flex-direction: column;
+  gap: 16px;
+}
+.mobile-stats {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+.mobile-nav-links {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.mobile-nav-links a {
+  font-family: 'Varela Round', sans-serif;
+  color: #d5c8ff;
+  text-decoration: none;
+  padding: 12px 16px;
+  border-radius: 12px;
+  font-size: 15px;
+  transition: background 0.15s;
+}
+.mobile-nav-links a:hover,
+.mobile-nav-links a.router-link-active {
+  background: rgba(255,255,255,0.1);
+  color: #fff;
+}
+
 /* Transition */
 .dropdown-fade-enter-active,
 .dropdown-fade-leave-active {
@@ -374,5 +480,39 @@ export default {
 .dropdown-fade-leave-to {
   opacity: 0;
   transform: translateY(-6px);
+}
+
+.drawer-fade-enter-active, .drawer-fade-leave-active { transition: opacity 0.2s; }
+.drawer-fade-enter-from, .drawer-fade-leave-to { opacity: 0; }
+.drawer-slide-enter-active, .drawer-slide-leave-active { transition: transform 0.25s ease, opacity 0.25s ease; }
+.drawer-slide-enter-from, .drawer-slide-leave-to { transform: translateY(-10px); opacity: 0; }
+
+/* ─── Responsive ─── */
+@media (max-width: 1100px) {
+  .header-inner { padding: 0 16px; }
+  .logo { margin-right: 24px; font-size: 20px; }
+  .nav-links { gap: 16px; }
+  .nav-links a { font-size: 13px; }
+  .header-right { gap: 8px; }
+  .stat-chip { padding: 3px 8px; font-size: 12px; }
+  .hide-tablet { display: none !important; }
+}
+
+@media (max-width: 768px) {
+  .nav-links { display: none; }
+  .hide-mobile { display: none !important; }
+  .burger-btn { display: flex; }
+  .mobile-overlay { display: block; }
+  .mobile-drawer { display: flex; }
+  .logo { margin-right: auto; font-size: 18px; }
+  .header-inner { gap: 12px; }
+  .username-label { display: none; }
+  .caret { display: none; }
+  .user-menu { padding: 4px; }
+}
+
+@media (max-width: 480px) {
+  .header-inner { padding: 0 12px; }
+  .logo { font-size: 16px; }
 }
 </style>

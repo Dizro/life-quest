@@ -8,10 +8,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime, timezone, timedelta
 
 from app.core.database import get_db
-from app.core.security import get_password_hash
+from app.core.security import get_password_hash, verify_password
 from app.models.user import User
 from app.models.user_buff import UserBuff
-from app.schemas.user import UserCreate, UserRead, UserUpdate, UserProfile
+from app.schemas.user import UserCreate, UserRead, UserUpdate, UserProfile, PasswordChange
 from app.api.dependencies import get_current_user
 
 router = APIRouter(tags=["users"])   # ← УБРАЛИ prefix="/users"
@@ -41,6 +41,11 @@ async def get_my_profile(current_user: User = Depends(get_current_user)) -> User
         character_class=current_user.character_class,
         is_active=current_user.is_active,
         created_at=current_user.created_at,
+        theme=current_user.theme,
+        language=current_user.language,
+        notifications_deadlines=current_user.notifications_deadlines,
+        notifications_evening=current_user.notifications_evening,
+        notifications_achievements=current_user.notifications_achievements,
         quests_completed=0,
         achievements_count=0,
     )
@@ -60,3 +65,29 @@ async def update_my_profile(
     await session.commit()
     await session.refresh(current_user)
     return current_user
+
+
+@router.post("/me/password")
+async def change_password(
+    body: PasswordChange,
+    session: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Смена пароля."""
+    if not verify_password(body.current_password, current_user.hashed_password):
+        raise HTTPException(status_code=400, detail="Неверный текущий пароль")
+    current_user.hashed_password = get_password_hash(body.new_password)
+    session.add(current_user)
+    await session.commit()
+    return {"success": True, "message": "Пароль изменён"}
+
+
+@router.delete("/me")
+async def delete_account(
+    session: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Удаление аккаунта."""
+    await session.delete(current_user)
+    await session.commit()
+    return {"success": True, "message": "Аккаунт удалён"}

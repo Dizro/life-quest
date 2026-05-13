@@ -54,7 +54,8 @@
                     v-model="displayName"
                     class="custom-input" 
                     type="text" 
-                    placeholder="Имя персонажа" 
+                    placeholder="Имя персонажа"
+                    autocomplete="nickname"
                   />
                 </div>
 
@@ -62,48 +63,65 @@
                   <input 
                     v-model="username"
                     class="custom-input" 
-                    :class="{ 'has-error': fieldErrors.username }"
+                    :class="{ 'has-error': fieldErrors.username, 'has-success': mode === 'register' && touched.username && !fieldErrors.username && username.length >= 3 }"
                     type="text" 
-                    placeholder="Логин (hero_knight)" 
-                    @input="fieldErrors.username = null"
+                    placeholder="Логин (hero_knight)"
+                    autocomplete="username"
+                    @input="validateUsername"
+                    @blur="touchField('username')"
                   />
                   <span v-if="fieldErrors.username" class="error-text">{{ fieldErrors.username }}</span>
+                  <span v-else-if="mode === 'register' && touched.username && username.length >= 3" class="success-text">Логин свободен</span>
                 </div>
 
                 <div v-if="mode === 'register'" class="input-group">
                   <input 
                     v-model="email"
                     class="custom-input" 
-                    :class="{ 'has-error': fieldErrors.email }"
+                    :class="{ 'has-error': fieldErrors.email, 'has-success': touched.email && !fieldErrors.email && isValidEmail(email) }"
                     type="email" 
-                    placeholder="Email" 
-                    @input="fieldErrors.email = null"
+                    placeholder="Email"
+                    autocomplete="email"
+                    @input="validateEmail"
+                    @blur="touchField('email')"
                   />
                   <span v-if="fieldErrors.email" class="error-text">{{ fieldErrors.email }}</span>
+                  <span v-else-if="touched.email && isValidEmail(email)" class="success-text">Email корректный</span>
                 </div>
 
                 <div class="input-group">
                   <input 
                     v-model="password"
                     class="custom-input" 
-                    :class="{ 'has-error': fieldErrors.password }"
+                    :class="{ 'has-error': fieldErrors.password, 'has-success': touched.password && !fieldErrors.password && password.length >= 8 }"
                     type="password" 
-                    placeholder="Пароль" 
-                    @input="fieldErrors.password = null"
+                    placeholder="Пароль"
+                    :autocomplete="mode === 'register' ? 'new-password' : 'current-password'"
+                    @input="validatePassword"
+                    @blur="touchField('password')"
                   />
                   <span v-if="fieldErrors.password" class="error-text">{{ fieldErrors.password }}</span>
+                  <div v-else-if="mode === 'register' && password.length > 0" class="password-strength">
+                    <div class="strength-bar">
+                      <div class="strength-fill" :style="{ width: passwordStrength.percent + '%', background: passwordStrength.color }"></div>
+                    </div>
+                    <span class="strength-label" :style="{ color: passwordStrength.color }">{{ passwordStrength.label }}</span>
+                  </div>
                 </div>
 
                 <div v-if="mode === 'register'" class="input-group">
                   <input 
                     v-model="confirmPassword"
                     class="custom-input" 
-                    :class="{ 'has-error': fieldErrors.confirmPassword }"
+                    :class="{ 'has-error': fieldErrors.confirmPassword, 'has-success': touched.confirmPassword && !fieldErrors.confirmPassword && confirmPassword.length > 0 && confirmPassword === password }"
                     type="password" 
-                    placeholder="Повторите пароль" 
-                    @input="fieldErrors.confirmPassword = null"
+                    placeholder="Повторите пароль"
+                    autocomplete="new-password"
+                    @input="validateConfirmPassword"
+                    @blur="touchField('confirmPassword')"
                   />
                   <span v-if="fieldErrors.confirmPassword" class="error-text">{{ fieldErrors.confirmPassword }}</span>
+                  <span v-else-if="touched.confirmPassword && confirmPassword === password && confirmPassword.length > 0" class="success-text">Пароли совпадают</span>
                 </div>
 
                 <div class="submit-action">
@@ -197,7 +215,7 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import { useRouter } from 'vue-router'
 
@@ -219,34 +237,96 @@ const fieldErrors = ref({
   password: null,
   confirmPassword: null
 })
+const touched = ref({
+  username: false,
+  email: false,
+  password: false,
+  confirmPassword: false
+})
+
+const touchField = (field) => {
+  touched.value[field] = true
+  if (field === 'username') validateUsername()
+  if (field === 'email') validateEmail()
+  if (field === 'password') validatePassword()
+  if (field === 'confirmPassword') validateConfirmPassword()
+}
+
+const isValidEmail = (email) => {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
+}
+
+const passwordStrength = computed(() => {
+  const p = password.value
+  if (p.length < 8) return { percent: Math.min(30, p.length * 4), color: '#ff6b6b', label: 'Слишком короткий' }
+  let score = 0
+  if (p.length >= 8) score++
+  if (p.length >= 12) score++
+  if (/[A-Z]/.test(p)) score++
+  if (/[0-9]/.test(p)) score++
+  if (/[^A-Za-z0-9]/.test(p)) score++
+  if (score <= 2) return { percent: 40, color: '#ff6b6b', label: 'Слабый' }
+  if (score <= 3) return { percent: 65, color: '#f6c90e', label: 'Средний' }
+  return { percent: 100, color: '#48bb78', label: 'Надёжный' }
+})
+
+const validateUsername = () => {
+  if (!touched.value.username && !username.value) return
+  if (!username.value || username.value.length < 3) {
+    fieldErrors.value.username = 'Минимум 3 символа'
+  } else if (!/^[a-zA-Z0-9_]+$/.test(username.value)) {
+    fieldErrors.value.username = 'Только латинские буквы, цифры и _'
+  } else {
+    fieldErrors.value.username = null
+  }
+}
+
+const validateEmail = () => {
+  if (!touched.value.email && !email.value) return
+  if (mode.value === 'register') {
+    if (!email.value) {
+      fieldErrors.value.email = 'Email обязателен'
+    } else if (!isValidEmail(email.value)) {
+      fieldErrors.value.email = 'Введи корректный email (например user@mail.ru)'
+    } else {
+      fieldErrors.value.email = null
+    }
+  }
+}
+
+const validatePassword = () => {
+  if (!touched.value.password && !password.value) return
+  if (!password.value || password.value.length < 8) {
+    fieldErrors.value.password = 'Минимум 8 символов'
+  } else {
+    fieldErrors.value.password = null
+  }
+  if (confirmPassword.value) validateConfirmPassword()
+}
+
+const validateConfirmPassword = () => {
+  if (!touched.value.confirmPassword && !confirmPassword.value) return
+  if (mode.value === 'register' && password.value !== confirmPassword.value) {
+    fieldErrors.value.confirmPassword = 'Пароли не совпадают'
+  } else {
+    fieldErrors.value.confirmPassword = null
+  }
+}
 
 const toggleMode = () => {
   mode.value = mode.value === 'login' ? 'register' : 'login'
   error.value = null
   fieldErrors.value = { username: null, email: null, password: null, confirmPassword: null }
+  touched.value = { username: false, email: false, password: false, confirmPassword: false }
 }
 
 const validate = () => {
-  fieldErrors.value = { username: null, email: null, password: null, confirmPassword: null }
-  let valid = true
-
-  if (!username.value || username.value.length < 3) {
-    fieldErrors.value.username = 'Минимум 3 символа'
-    valid = false
-  }
-  if (mode.value === 'register' && (!email.value || !email.value.includes('@'))) {
-    fieldErrors.value.email = 'Введи корректный email'
-    valid = false
-  }
-  if (!password.value || password.value.length < 8) {
-    fieldErrors.value.password = 'Минимум 8 символов'
-    valid = false
-  }
-  if (mode.value === 'register' && password.value !== confirmPassword.value) {
-    fieldErrors.value.confirmPassword = 'Пароли не совпадают'
-    valid = false
-  }
-  return valid
+  touched.value = { username: true, email: true, password: true, confirmPassword: true }
+  validateUsername()
+  validateEmail()
+  validatePassword()
+  validateConfirmPassword()
+  return !fieldErrors.value.username && !fieldErrors.value.email && !fieldErrors.value.password && !fieldErrors.value.confirmPassword
 }
 
 const handleSubmit = async () => {
@@ -273,7 +353,18 @@ const handleSubmit = async () => {
       }
     }
   } catch (err) {
-    error.value = err?.detail || authStore.error || 'Что-то пошло не так'
+    const detail = err?.detail
+    if (typeof detail === 'string') {
+      if (detail.toLowerCase().includes('username') || detail.toLowerCase().includes('логин')) {
+        fieldErrors.value.username = detail
+      } else if (detail.toLowerCase().includes('email') || detail.toLowerCase().includes('почт')) {
+        fieldErrors.value.email = detail
+      } else {
+        error.value = detail
+      }
+    } else {
+      error.value = authStore.error || 'Что-то пошло не так'
+    }
   } finally {
     loading.value = false
   }
@@ -500,10 +591,54 @@ const handleSubmit = async () => {
   border-color: #ff6b6b;
 }
 
+.custom-input.has-success {
+  border-color: #48bb78;
+}
+
 .error-text {
   font-size: 12px;
   color: #ff6b6b;
   margin-left: 4px;
+  animation: fadeIn 0.2s ease;
+}
+
+.success-text {
+  font-size: 12px;
+  color: #48bb78;
+  margin-left: 4px;
+  animation: fadeIn 0.2s ease;
+}
+
+.password-strength {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.strength-bar {
+  flex: 1;
+  height: 4px;
+  background: rgba(255,255,255,0.1);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.strength-fill {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 0.3s, background 0.3s;
+}
+
+.strength-label {
+  font-size: 11px;
+  font-family: 'Varela Round', sans-serif;
+  white-space: nowrap;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 .error-banner {
@@ -669,6 +804,7 @@ const handleSubmit = async () => {
   .hero-right {
     flex: unset;
     max-width: 100%;
+    width: 100%;
   }
   .features-grid {
     grid-template-columns: 1fr;
@@ -677,5 +813,34 @@ const handleSubmit = async () => {
   .heading-motivate {
     font-size: 42px;
   }
+  .section-title { font-size: 36px; }
+  .hero-visuals { height: 220px; }
+}
+
+@media (max-width: 600px) {
+  .nav { height: 60px; padding: 0 16px; }
+  .logo { font-size: 20px; }
+  .nav-button { padding: 6px 16px; font-size: 14px; }
+  .hero-section { padding: 40px 16px 16px; }
+  .heading-motivate { font-size: 32px; }
+  .hero-subtitle { font-size: 15px; }
+  .heading-sign-up { font-size: 24px; margin-bottom: 16px; }
+  .custom-input { padding: 12px 14px; font-size: 13px; }
+  .submit-button { padding: 12px 32px; }
+  .section-title { font-size: 28px; }
+  .section-subtitle { font-size: 15px; margin: 0 auto 40px; }
+  .features-section { padding: 40px 16px 60px; }
+  .use-cases-section { padding: 40px 16px 0; }
+  .hero-visuals { height: 180px; max-width: 300px; }
+  .feature-card h3 { font-size: 20px; }
+  .feature-card p { font-size: 14px; }
+}
+
+@media (max-width: 400px) {
+  .heading-motivate { font-size: 26px; }
+  .hero-subtitle { font-size: 14px; }
+  .heading-sign-up { font-size: 20px; }
+  .nav { height: 52px; }
+  .logo { font-size: 18px; }
 }
 </style>

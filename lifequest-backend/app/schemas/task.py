@@ -35,6 +35,10 @@ class TaskResponse(BaseModel):
     deadline: Optional[datetime]
     completed_at: Optional[datetime]
     created_at: datetime
+    completion_count: int = 0
+    # Испытания
+    trial_expires_at: Optional[datetime] = None  # дата перехода в trial
+    redeem_cost: int = 0
 
     model_config = {"from_attributes": True}
 

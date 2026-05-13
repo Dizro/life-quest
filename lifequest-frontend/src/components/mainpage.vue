@@ -74,29 +74,48 @@
                 <span class="col-icon">🔄</span>
                 <h2>Рутина и Привычки</h2>
               </div>
-              <button class="add-btn" @click="openModal('daily')">+</button>
+              <button v-if="activeFilter === 'active'" class="add-btn" @click="openModal('daily')">+</button>
             </div>
             
             <div class="task-list">
               <TransitionGroup name="list">
-                <div v-for="task in filteredLeftTasks" :key="task.id" class="task-card" :class="{ 'completed': task.status === 'completed' }">
+                <div v-for="task in filteredLeftTasks" :key="task.id" class="task-card" :class="{ 'completed': task.status === 'completed', 'redeemed': task.status === 'redeemed', 'trial': task.status === 'trial' }">
                   <div class="color-stripe" :class="getStripeColor(task.category)">
-                    <div v-if="task.status === 'pending_es'" class="spinner"></div>
-                    <div v-else class="custom-checkbox" :class="{ checked: task.status === 'completed' }" @click="completeTask(task)">
-                      <span v-if="task.status === 'completed'" class="check-icon">✔</span>
-                    </div>
+                    <template v-if="task.task_type === 'habit'">
+                      <div class="habit-controls">
+                        <button class="habit-btn habit-plus" @click="completeTask(task)" title="+1">+</button>
+                        <span class="habit-count">{{ task.completion_count || 0 }}</span>
+                        <button class="habit-btn habit-minus" @click="habitMinus(task)" title="−1">−</button>
+                      </div>
+                    </template>
+                    <template v-else>
+                      <div v-if="task.status === 'pending_es'" class="spinner"></div>
+                      <div v-else-if="task.status === 'completed' || task.status === 'redeemed'" class="custom-checkbox checked">
+                        <span class="check-icon">✔</span>
+                      </div>
+                      <div v-else class="custom-checkbox" @click="completeTask(task)">
+                      </div>
+                    </template>
                   </div>
                   <div class="task-content">
-                    <h3 class="task-title" :class="{ 'strike': task.status === 'completed' }">
+                    <h3 class="task-title" :class="{ 'strike': task.status === 'completed' || task.status === 'redeemed' }">
                       <span v-if="task.task_type === 'habit'" class="type-badge">Привычка</span>
                       {{ task.title }}
                     </h3>
                     <p v-if="task.description" class="task-desc">{{ task.description }}</p>
                   </div>
                   <div class="task-rewards">
-                    <span v-if="task.status !== 'pending_es'" class="xp-reward">{{ task.xp_reward }} XP</span>
-                    <span v-if="task.status !== 'pending_es'" class="gold-reward">{{ task.gold_reward }} 💰</span>
+                    <template v-if="task.task_type === 'habit' && task.status !== 'pending_es'">
+                      <span class="xp-reward">+{{ task.xp_reward }} XP</span>
+                      <span class="gold-reward">+{{ task.gold_reward }} 💰</span>
+                      <span class="per-tick-label">за тик</span>
+                    </template>
+                    <template v-else>
+                      <span v-if="task.status !== 'pending_es'" class="xp-reward">{{ task.xp_reward }} XP</span>
+                      <span v-if="task.status !== 'pending_es'" class="gold-reward">{{ task.gold_reward }} 💰</span>
+                    </template>
                   </div>
+                  <button class="task-delete-btn" @click.stop="deleteTask(task)" title="Удалить">×</button>
                 </div>
               </TransitionGroup>
               <div v-if="!filteredLeftTasks.length" class="empty-state">
@@ -111,32 +130,37 @@
                 <span class="col-icon">⚔️</span>
                 <h2>Разовые Квесты</h2>
               </div>
-              <button class="add-btn" @click="openModal('regular')">+</button>
+              <button v-if="activeFilter === 'active'" class="add-btn" @click="openModal('regular')">+</button>
             </div>
             
             <div class="task-list">
               <TransitionGroup name="list">
-                <div v-for="task in filteredRightTasks" :key="task.id" class="task-card" :class="{ 'completed': task.status === 'completed', 'trial': task.status === 'trial' }">
+                <div v-for="task in filteredRightTasks" :key="task.id" class="task-card" :class="{ 'completed': task.status === 'completed', 'redeemed': task.status === 'redeemed', 'trial': task.status === 'trial' }">
                   <div class="color-stripe" :class="getStripeColor(task.category)">
                     <div v-if="task.status === 'pending_es'" class="spinner"></div>
-                    <div v-else class="custom-checkbox" :class="{ checked: task.status === 'completed' }" @click="completeTask(task)">
-                      <span v-if="task.status === 'completed'" class="check-icon">✔</span>
+                    <div v-else-if="task.status === 'completed' || task.status === 'redeemed'" class="custom-checkbox checked">
+                      <span class="check-icon">✔</span>
+                    </div>
+                    <div v-else class="custom-checkbox" @click="completeTask(task)">
                     </div>
                   </div>
                   <div class="task-content">
-                    <h3 class="task-title" :class="{ 'strike': task.status === 'completed', 'trial-text': task.status === 'trial' }">
-                      <span v-if="task.status === 'trial'" class="trial-badge">☠️ [Испытание]</span>
+                    <h3 class="task-title" :class="{ 'strike': task.status === 'completed' || task.status === 'redeemed', 'trial-text': task.status === 'trial' }">
                       {{ task.title }}
                     </h3>
-                    <div v-if="task.deadline && task.status !== 'completed'" class="task-deadline" :class="{ 'overdue': task.status === 'trial' }">
+                    <div v-if="task.deadline && task.status !== 'completed' && task.status !== 'redeemed'" class="task-deadline" :class="{ 'overdue': task.status === 'trial' }">
                       ⏱ {{ new Date(task.deadline).toLocaleString('ru-RU', {day: 'numeric', month: 'short', hour: '2-digit', minute:'2-digit'}) }}
                     </div>
                     <div v-if="task.status === 'pending_es'" class="ai-loading">✨ Оценка ИИ (Слой 1)...</div>
+                    <div v-if="task.status === 'trial'" class="trial-actions">
+                      <button class="redeem-btn" @click.stop="redeemTask(task)">💰 Искупить ({{ task.redeem_cost || '?' }} Gold)</button>
+                    </div>
                   </div>
                   <div class="task-rewards" :class="{ 'trial-bg': task.status === 'trial' }">
                     <span v-if="task.status !== 'pending_es'" class="xp-reward" :class="{ 'strike trial-text': task.status === 'trial' }">{{ task.xp_reward }} XP</span>
                     <span v-if="task.status !== 'pending_es'" class="gold-reward">{{ task.gold_reward }} 💰</span>
                   </div>
+                  <button class="task-delete-btn" @click.stop="deleteTask(task)" title="Удалить">×</button>
                 </div>
               </TransitionGroup>
               <div v-if="!filteredRightTasks.length" class="empty-state">
@@ -238,30 +262,22 @@
 
     <Teleport to="body">
       <Transition name="reward-pop">
-        <div v-if="rewardPopup" class="reward-overlay" @click.self="rewardPopup = null">
-          <div class="reward-card">
-            <div class="reward-trophy">🏆</div>
-            <h2 class="reward-title">Квест Завершён!</h2>
-            <div class="reward-phrase-box">
-              <p class="reward-phrase">«{{ rewardPopup.farrix_phrase }}»</p>
+        <div v-if="rewardPopup" class="reward-toast" @click="rewardPopup = null">
+          <div class="reward-toast-inner">
+            <div class="reward-toast-left">
+              <span class="reward-toast-icon">✨</span>
             </div>
-            <div class="reward-items">
-              <div class="reward-item">
-                <span class="reward-val xp">+{{ rewardPopup.xp_gained }}</span>
-                <span class="reward-label">Опыта (XP)</span>
-              </div>
-              <div class="reward-item">
-                <span class="reward-val gold">+{{ rewardPopup.gold_gained }}</span>
-                <span class="reward-label">Монет</span>
+            <div class="reward-toast-body">
+              <div class="reward-toast-title">Задача выполнена</div>
+              <div v-if="rewardPopup.farrix_phrase" class="reward-toast-phrase">{{ rewardPopup.farrix_phrase }}</div>
+              <div class="reward-toast-stats">
+                <span v-if="rewardPopup.xp_gained" class="reward-chip xp">+{{ rewardPopup.xp_gained }} XP</span>
+                <span v-if="rewardPopup.gold_gained" class="reward-chip gold">+{{ rewardPopup.gold_gained }} 💰</span>
+                <span v-if="rewardPopup.leveled_up" class="reward-chip level">🌟 Ур. {{ rewardPopup.new_level }}!</span>
+                <span v-if="rewardPopup.achievement_unlocked" class="reward-chip ach">🏅 {{ rewardPopup.achievement_unlocked }}</span>
               </div>
             </div>
-            <div v-if="rewardPopup.leveled_up" class="level-up-banner">
-              🌟 НОВЫЙ УРОВЕНЬ: {{ rewardPopup.new_level }}!
-            </div>
-            <div v-if="rewardPopup.achievement_unlocked" class="achievement-banner">
-              🏅 Разблокировано: {{ rewardPopup.achievement_unlocked }}
-            </div>
-            <button @click="rewardPopup = null" class="btn-claim">Продолжить Путь</button>
+            <button class="reward-toast-close" @click.stop="rewardPopup = null">×</button>
           </div>
         </div>
       </Transition>
@@ -292,7 +308,22 @@ export default {
     const rewardPopup = ref(null)
     let pollingInterval = null
 
+    // Отправить сообщение от Фаррикса в чат (сохраняется в localStorage + window event)
+    const pushFarrixMessage = (text) => {
+      const msg = { role: 'assistant', content: text }
+      // Пишем напрямую в localStorage чтобы чат подхватил даже без перехода на страницу
+      try {
+        const key = 'lq_chat_history'
+        const saved = JSON.parse(localStorage.getItem(key) || '[]')
+        saved.push(msg)
+        localStorage.setItem(key, JSON.stringify(saved.slice(-50)))
+      } catch {}
+      // Event для live-обновления если чат открыт
+      window.dispatchEvent(new CustomEvent('farrix-message', { detail: msg }))
+    }
+
     const getAsset = (folder, name, ext = '.png') => {
+      if (!name || name === 'undefined') return ''
       try {
         return new URL(`../assets/${folder}/${name}${ext}`, import.meta.url).href
       } catch (e) {
@@ -384,15 +415,48 @@ export default {
       }
     }
 
+    const redeemTask = async (task) => {
+      if (!confirm(`Искупить испытание за ${task.redeem_cost || '?'} Gold?`)) return
+      try {
+        await tasksApi.redeem(task.id)
+        await authStore.fetchProfile()
+        await loadTasks()
+      } catch (err) {
+        alert(err?.detail || err?.response?.data?.detail || 'Ошибка выкупа')
+      }
+    }
+
+    const deleteTask = async (task) => {
+      if (!confirm(`Удалить «${task.title}»?`)) return
+      try {
+        await tasksApi.delete(task.id)
+        await loadTasks()
+      } catch (err) {
+        alert(err?.response?.data?.detail || 'Ошибка удаления')
+      }
+    }
+
+    const habitMinus = async (task) => {
+      if (task.task_type !== 'habit') return
+      if ((task.completion_count || 0) <= 0) return
+      try {
+        await tasksApi.habitMinus(task.id)
+        await authStore.fetchProfile()
+        await loadTasks()
+      } catch (err) {
+        alert(err?.response?.data?.detail || 'Ошибка')
+      }
+    }
+
     const completeTask = async (task) => {
       if (task.status === 'pending_es') {
         alert("Подождите, Фаррикс еще оценивает сложность задачи (Слой 1)!")
         return
       }
-      if (task.status === 'completed') return
+      if (task.status === 'completed' || task.status === 'redeemed' || task.status === 'archived') return
 
       const originalStatus = task.status
-      task.status = 'completed'
+      if (task.task_type !== 'habit') task.status = 'completed'
 
       try {
         const response = await tasksApi.complete(task.id)
@@ -400,9 +464,17 @@ export default {
         
         if (response.xp_gained > 0 || response.gold_gained > 0 || response.farrix_phrase) {
           rewardPopup.value = response
-        } else {
-          alert("Дневной лимит наград достигнут. Задача засчитана в стрик, но XP и Золото = 0.")
+          setTimeout(() => { rewardPopup.value = null }, 4000)
         }
+
+        // В чат пишем только важные события (ачивки, левел-ап), не спамим фразами
+        if (response.achievement_unlocked) {
+          pushFarrixMessage(`🏅 Достижение разблокировано: «${response.achievement_unlocked}»! Поздравляю, ${authStore.displayName || 'герой'}!`)
+        }
+        if (response.leveled_up) {
+          pushFarrixMessage(`🌟 Новый уровень: ${response.new_level}! Сила растёт, ${authStore.displayName || 'герой'}!`)
+        }
+
         await loadTasks()
       } catch (err) {
         console.error('Ошибка выполнения:', err)
@@ -462,6 +534,9 @@ export default {
       closeModal,
       submitTask,
       completeTask,
+      redeemTask,
+      deleteTask,
+      habitMinus,
       getAsset,
       getStripeColor
     }
@@ -740,7 +815,20 @@ export default {
 }
 
 .task-card.completed { opacity: 0.6; filter: grayscale(100%); }
+.task-card.redeemed { opacity: 0.6; filter: grayscale(100%); }
 .task-card.trial { border-color: #fc8181; background: #fff5f5; }
+
+.trial-actions { margin-top: 6px; }
+.redeem-btn {
+  padding: 5px 14px; border-radius: 10px; border: 2px solid #e53e3e;
+  background: #fff5f5; color: #e53e3e; font-family: 'Varela Round', sans-serif;
+  font-size: 12px; font-weight: 700; cursor: pointer; transition: all 0.2s;
+}
+.redeem-btn:hover { background: #fed7d7; }
+
+.redeem-badge { background: #fbd38d !important; color: #744210 !important; }
+
+.custom-checkbox.checked { background: transparent; cursor: default; pointer-events: none; }
 
 .color-stripe {
   width: 60px;
@@ -806,6 +894,71 @@ export default {
   padding: 2px 8px;
   border-radius: 8px;
   text-transform: uppercase;
+}
+
+/* ─── Habit +/- Controls ─── */
+.habit-controls {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+.habit-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 2px solid rgba(255,255,255,0.5);
+  background: rgba(255,255,255,0.2);
+  color: #fff;
+  font-size: 18px;
+  font-weight: 900;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+  line-height: 1;
+}
+.habit-plus:hover { background: #48bb78; border-color: #48bb78; transform: scale(1.15); }
+.habit-minus:hover { background: #e53e3e; border-color: #e53e3e; transform: scale(1.15); }
+.habit-count {
+  font-size: 16px;
+  font-weight: 900;
+  color: #fff;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.3);
+  min-width: 20px;
+  text-align: center;
+}
+/* ─── Удаление задачи ─── */
+.task-card { position: relative; }
+.task-delete-btn {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 20px;
+  height: 20px;
+  border: none;
+  background: none;
+  color: #cbd5e0;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  border-radius: 50%;
+  opacity: 0;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.task-card:hover .task-delete-btn { opacity: 1; }
+.task-delete-btn:hover { color: #e53e3e; background: rgba(229,62,62,0.08); }
+
+.per-tick-label {
+  font-size: 9px;
+  color: #a0aec0;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: 700;
 }
 
 .strike { text-decoration: line-through; color: #a0aec0; }
@@ -1017,7 +1170,26 @@ export default {
 
 .select-input {
   appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
   cursor: pointer;
+  background-color: #f9f9fa;
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6' fill='%239a62ff'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: calc(100% - 16px) center;
+  background-size: 10px 6px;
+  padding-right: 40px;
+}
+.select-input option {
+  padding: 10px;
+  font-size: 15px;
+  background: #fff;
+  color: #2a1a5e;
+}
+.select-input:focus {
+  border-color: #9a62ff;
+  box-shadow: 0 0 0 3px rgba(154,98,255,0.15);
+  background-color: #fff;
 }
 
 .form-row {
@@ -1078,150 +1250,124 @@ export default {
   animation: spin 1s linear infinite;
 }
 
-/* ─── Попап Награды ─── */
-.reward-overlay {
+/* ─── Тост Награды (мягкий) ─── */
+.reward-toast {
   position: fixed;
-  inset: 0;
-  background: rgba(0,0,0,0.3);
-  backdrop-filter: blur(6px);
+  top: 24px;
+  right: 24px;
   z-index: 3000;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 20px;
-}
-
-.reward-card {
-  background: linear-gradient(180deg, #432874 0%, #2a1a5e 100%);
-  border: 6px solid #fdd243;
-  border-radius: 40px;
-  padding: 40px;
-  width: 100%;
-  max-width: 440px;
-  text-align: center;
-  position: relative;
-  box-shadow: 0 20px 60px rgba(0,0,0,0.3);
-}
-
-.reward-trophy {
-  position: absolute;
-  top: -50px;
-  left: 50%;
-  transform: translateX(-50%);
-  font-size: 80px;
-  filter: drop-shadow(0 10px 10px rgba(0,0,0,0.2));
-}
-
-.reward-title {
-  font-family: 'Intro Black', sans-serif;
-  font-size: 32px;
-  color: #fff;
-  margin: 20px 0 16px 0;
-}
-
-.reward-phrase-box {
-  background: rgba(255,255,255,0.1);
-  border: 1px solid rgba(255,255,255,0.2);
-  border-radius: 16px;
-  padding: 16px;
-  margin-bottom: 24px;
-}
-
-.reward-phrase {
-  font-size: 15px;
-  color: #e8d5ff;
-  margin: 0;
-  font-style: italic;
-}
-
-.reward-items {
-  display: flex;
-  justify-content: center;
-  gap: 20px;
-  margin-bottom: 24px;
-}
-
-.reward-item {
-  background: rgba(255,255,255,0.05);
-  border: 1px solid rgba(255,255,255,0.1);
-  border-radius: 24px;
-  padding: 16px 32px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-}
-
-.reward-val {
-  font-size: 36px;
-  font-weight: 900;
-  line-height: 1;
-  margin-bottom: 8px;
-}
-.reward-val.xp { color: #fdd243; }
-.reward-val.gold { color: #ff944c; }
-
-.reward-label {
-  font-size: 11px;
-  color: rgba(255,255,255,0.7);
-  text-transform: uppercase;
-  letter-spacing: 1px;
-  font-weight: bold;
-}
-
-.level-up-banner {
-  background: linear-gradient(90deg, #24cc8f, #10b981);
-  color: white;
-  font-weight: 900;
-  font-size: 18px;
-  padding: 12px;
-  border-radius: 16px;
-  margin-bottom: 16px;
-  animation: bounce 1s infinite;
-}
-
-.achievement-banner {
-  background: linear-gradient(90deg, #3bcad7, #3182ce);
-  color: white;
-  font-weight: bold;
-  padding: 12px;
-  border-radius: 16px;
-  margin-bottom: 16px;
-}
-
-.btn-claim {
-  background: linear-gradient(90deg, #fdd243, #d69e2e);
-  color: #2a1a5e;
-  border: none;
-  width: 100%;
-  padding: 16px;
-  border-radius: 16px;
-  font-size: 18px;
-  font-weight: 900;
+  max-width: 420px;
+  width: calc(100% - 48px);
   cursor: pointer;
-  transition: transform 0.2s;
 }
-.btn-claim:hover { transform: scale(1.02); }
+.reward-toast-inner {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  background: #fff;
+  border-radius: 18px;
+  padding: 18px 20px;
+  box-shadow: 0 8px 40px rgba(42,26,94,0.12), 0 2px 8px rgba(0,0,0,0.06);
+  border-left: 4px solid #9a62ff;
+}
+.reward-toast-left {
+  font-size: 28px;
+  flex-shrink: 0;
+  line-height: 1;
+}
+.reward-toast-body {
+  flex: 1;
+  min-width: 0;
+}
+.reward-toast-title {
+  font-family: 'Varela Round', sans-serif;
+  font-size: 15px;
+  font-weight: 700;
+  color: #2a1a5e;
+  margin-bottom: 4px;
+}
+.reward-toast-phrase {
+  font-size: 13px;
+  color: #5a4a7a;
+  line-height: 1.4;
+  margin-bottom: 10px;
+}
+.reward-toast-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.reward-chip {
+  font-family: 'Varela Round', sans-serif;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 3px 10px;
+  border-radius: 8px;
+}
+.reward-chip.xp { background: #f0ebff; color: #6133b4; }
+.reward-chip.gold { background: #fef9e7; color: #92600a; }
+.reward-chip.level { background: #d1fae5; color: #065f46; }
+.reward-chip.ach { background: #dbeafe; color: #1e40af; }
 
-@keyframes bounce {
-  0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-5px); }
+.reward-toast-close {
+  background: none;
+  border: none;
+  font-size: 20px;
+  color: #a0aec0;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+.reward-toast-close:hover { color: #2a1a5e; }
+
+/* Анимации — мягкий slide-in, без тряски */
+.reward-pop-enter-active {
+  transition: transform 0.35s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.35s ease;
+}
+.reward-pop-enter-from {
+  opacity: 0;
+  transform: translateX(60px);
+}
+.reward-pop-leave-active {
+  transition: transform 0.25s ease, opacity 0.25s ease;
+}
+.reward-pop-leave-to {
+  opacity: 0;
+  transform: translateX(60px);
 }
 
 .modal-enter-active, .modal-leave-active { transition: opacity 0.3s ease; }
 .modal-enter-from, .modal-leave-to { opacity: 0; }
 
-.reward-pop-enter-active { animation: popIn 0.5s cubic-bezier(0.34, 1.56, 0.64, 1); }
-@keyframes popIn {
-  0% { opacity: 0; transform: scale(0.5) translateY(50px); }
-  100% { opacity: 1; transform: scale(1) translateY(0); }
+/* ─── Адаптив ─── */
+@media (max-width: 1100px) {
+  .main-container { padding: 24px 16px; }
+  .columns-grid { gap: 20px; }
 }
 
-/* ─── Адаптив ─── */
 @media (max-width: 900px) {
   .profile-card { flex-direction: column; text-align: center; }
   .profile-header { flex-direction: column; align-items: center; gap: 16px; }
   .header-badges { align-items: center; }
-  .stats-row { justify-content: center; }
+  .stats-row { justify-content: center; flex-wrap: wrap; }
   .columns-grid { grid-template-columns: 1fr; }
+  .filters-bar { flex-wrap: wrap; justify-content: center; }
+  .filter-btn { font-size: 13px; padding: 8px 14px; }
+  .col-title h2 { font-size: 16px; }
+  .column-header { padding: 12px 16px; }
+}
+
+@media (max-width: 600px) {
+  .main-container { padding: 16px 12px; }
+  .profile-card { padding: 16px; border-radius: 16px; }
+  .avatar-scene { width: 100px; height: 100px; }
+  .hero-name { font-size: 20px; }
+  .stat-pill { font-size: 12px; padding: 4px 10px; }
+  .task-card { flex-direction: column; }
+  .task-rewards { flex-direction: row; min-width: unset; padding: 10px 16px; gap: 12px; }
+  .modal-content { padding: 20px; border-radius: 20px; }
+  .form-row { grid-template-columns: 1fr; }
+  .modal-title { font-size: 22px; }
 }
 </style>

@@ -130,19 +130,23 @@ async def _async_transition_overdue() -> None:
 
     async with async_session_factory() as db:
         now = datetime.now(timezone.utc)
+        # Только regular и daily (привычки не становятся испытаниями — мини-ТЗ)
         result = await db.execute(
             select(Task).where(
                 Task.status == "active",
                 Task.deadline < now,
                 Task.deadline.isnot(None),
+                Task.task_type.in_(["regular", "daily"]),
             )
         )
         tasks = result.scalars().all()
 
         for task in tasks:
             task.status = "trial"
-            task.trial_expires_at = now + timedelta(days=3)
-            task.redeem_cost = max(10, (task.effort_score or 5) * 5)
+            # trial_expires_at хранит дату перехода в испытание (trial_started_at)
+            task.trial_expires_at = now
+            # Стоимость выкупа = ES × 10 (мини-ТЗ)
+            task.redeem_cost = (task.effort_score or 5) * 10
 
         if tasks:
             await db.commit()

@@ -77,6 +77,7 @@ async def _check_and_increment_limit(user_id: int, redis: aioredis.Redis) -> int
 async def _build_farrix_prompt(user: User, db: AsyncSession, user_message: str, history: List[ChatMessage]) -> str:
     """
     Формирует системный промпт с контекстом пользователя (раздел 7.2 ТЗ).
+    Передаём максимум информации, чтобы Фаррикс знал всё о герое.
     НЕ передаётся: полная история задач, архив, данные других пользователей.
     """
     # Последние 5 завершённых задач
@@ -88,38 +89,96 @@ async def _build_farrix_prompt(user: User, db: AsyncSession, user_message: str, 
     )
     last_tasks = [row[0] for row in last_tasks_result.fetchall()]
 
-    # Количество активных испытаний
+    # Активные задачи (текущие квесты)
+    active_tasks_result = await db.execute(
+        select(Task.title, Task.task_type, Task.complexity_level)
+        .where(Task.user_id == user.id, Task.status == "active")
+        .order_by(Task.created_at.desc())
+        .limit(10)
+    )
+    active_tasks = [f"{row[0]} ({row[1]}, {row[2] or '?'})" for row in active_tasks_result.fetchall()]
+
+    # Количество активных испытаний (просроченные)
     trials_result = await db.execute(
         select(sql_func.count(Task.id))
         .where(Task.user_id == user.id, Task.status == "trial")
     )
     active_trials_count = trials_result.scalar() or 0
 
-    context = {
-        "user_level": user.level,
-        "current_streak": user.streak_days,
-        "active_trials_count": active_trials_count,
-        "last_5_completed_tasks": last_tasks,
-        "current_daily_xp": user.daily_xp_earned,
-        "daily_xp_limit": 200 + user.level * 20,
-    }
+    # Общее кол-во выполненных задач
+    total_completed_result = await db.execute(
+        select(sql_func.count(Task.id))
+        .where(Task.user_id == user.id, Task.status == "completed")
+    )
+    total_completed = total_completed_result.scalar() or 0
+
+    # Экипировка
+    equipment = []
+    if user.equipped_hat:
+        equipment.append(f"Шлем: {user.equipped_hat}")
+    if user.equipped_armor:
+        equipment.append(f"Броня: {user.equipped_armor}")
+    if user.equipped_weapon:
+        equipment.append(f"Оружие: {user.equipped_weapon}")
+    if user.equipped_pet:
+        equipment.append(f"Питомец: {user.equipped_pet}")
+    if user.equipped_background:
+        equipment.append(f"Фон: {user.equipped_background}")
+    equipment_str = ", ".join(equipment) if equipment else "ничего не надето"
+
+    # XP-множитель
+    xp_buff = ""
+    if user.xp_multiplier and user.xp_multiplier > 1.0:
+        xp_buff = f"×{user.xp_multiplier} XP (активен бафф)"
+    else:
+        xp_buff = "нет"
+
+    daily_xp_limit = 200 + user.level * 20
+    xp_progress = f"{user.xp}/{user.xp_to_next_level}"
+
+    # Возраст аккаунта
+    account_days = (datetime.now(timezone.utc) - user.created_at).days if user.created_at else 0
+
+    name = user.display_name or user.username
 
     system_prompt = f"""Ты — Фаррикс, ИИ-наставник в RPG-приложении LifeQuest. 
 Твоя задача: поддерживать и вдохновлять пользователя (героя) в его повседневных делах, используя лёгкую игровую стилистику.
 
 Правила:
-- Длина ответа — 1–2 коротких предложения.
-- Обращайся к пользователю по имени: {user.display_name or user.username}.
+- Длина ответа — 1–3 коротких предложения. Можно больше, если пользователь задаёт сложный вопрос.
+- Обращайся к пользователю по имени: {name}.
 - Используй игровую терминологию: квест, подвиг, дракон, опыт, уровень.
 - Тон: поддержка, похвала, лёгкий юмор, воодушевление. Без сарказма и критики.
+- Если пользователь спрашивает о своих характеристиках — отвечай точными данными из контекста ниже.
+- Можешь давать советы по продуктивности и тайм-менеджменту в игровом стиле.
 - Запрещены: политика, религия, оскорбления, советы по здоровью, финансы, интим, насилие, наркотики, реклама.
 
-Контекст пользователя:
-- Уровень: {context['user_level']}
-- Текущий стрик: {context['current_streak']}
-- Активных испытаний: {context['active_trials_count']}
-- Последние выполненные задачи: {', '.join(context['last_5_completed_tasks']) or 'нет'}
-- XP за сегодня: {context['current_daily_xp']} / {context['daily_xp_limit']}"""
+═══ Полный профиль героя ═══
+- Имя: {name}
+- Класс: {user.character_class}
+- Звание: {user.rank_title}
+- Уровень: {user.level}
+- XP: {xp_progress} до следующего уровня
+- Золото: {user.gold} 💰
+- Кристаллы: {user.crystals} 💎
+- Стрик (текущий): {user.streak_days} дней
+- Макс. стрик: {user.max_streak} дней
+- XP за сегодня: {user.daily_xp_earned} / {daily_xp_limit}
+- XP бафф: {xp_buff}
+- Дней в игре: {account_days}
+- Всего квестов выполнено: {total_completed}
+
+═══ Экипировка ═══
+{equipment_str}
+
+═══ Активные квесты (до 10) ═══
+{chr(10).join(f'• {t}' for t in active_tasks) if active_tasks else 'Нет активных квестов'}
+
+═══ Испытания (просрочено) ═══
+Количество: {active_trials_count}
+
+═══ Последние выполненные квесты ═══
+{chr(10).join(f'✓ {t}' for t in last_tasks) if last_tasks else 'Пока нет выполненных квестов'}"""
 
     return system_prompt
 

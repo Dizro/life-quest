@@ -6,7 +6,7 @@ from sqlalchemy import select
 from pydantic import BaseModel, EmailStr
 
 from app.core.database import get_db
-from app.core.security import verify_password, get_password_hash, create_access_token
+from app.core.security import verify_password, get_password_hash, create_access_token, create_refresh_token, decode_token
 from app.models.user import User
 from app.models.user_buff import UserBuff
 
@@ -28,7 +28,12 @@ class UserLogin(BaseModel):
 
 class TokenResponse(BaseModel):
     access_token: str
+    refresh_token: str
     token_type: str
+
+
+class RefreshRequest(BaseModel):
+    refresh_token: str
 
 
 # --- Эндпоинты ---
@@ -87,7 +92,8 @@ async def register(user_data: UserCreate, db: AsyncSession = Depends(get_db)):
     await db.refresh(new_user)
 
     access_token = create_access_token({"sub": str(new_user.id)})
-    return {"access_token": access_token, "token_type": "bearer"}
+    refresh_token = create_refresh_token({"sub": str(new_user.id)})
+    return {"access_token": access_token, "refresh_token": refresh_token, "token_type": "bearer"}
 
 
 @router.post("/login", response_model=TokenResponse)
@@ -100,4 +106,23 @@ async def login(user_data: UserLogin, db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=401, detail="Неверный логин или пароль")
 
     access_token = create_access_token({"sub": str(user.id)})
-    return {"access_token": access_token, "token_type": "bearer"}
+    refresh_token = create_refresh_token({"sub": str(user.id)})
+    return {"access_token": access_token, "refresh_token": refresh_token, "token_type": "bearer"}
+
+
+@router.post("/refresh", response_model=TokenResponse)
+async def refresh_tokens(body: RefreshRequest, db: AsyncSession = Depends(get_db)):
+    """Обновление access-токена по refresh-токену."""
+    payload = decode_token(body.refresh_token)
+    if not payload or payload.get("type") != "refresh":
+        raise HTTPException(status_code=401, detail="Невалидный refresh-токен")
+
+    user_id = payload.get("sub")
+    query = await db.execute(select(User).where(User.id == int(user_id)))
+    user = query.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=401, detail="Пользователь не найден")
+
+    new_access = create_access_token({"sub": str(user.id)})
+    new_refresh = create_refresh_token({"sub": str(user.id)})
+    return {"access_token": new_access, "refresh_token": new_refresh, "token_type": "bearer"}

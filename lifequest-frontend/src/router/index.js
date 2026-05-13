@@ -1,4 +1,4 @@
-import { createWebHistory, createRouter } from 'vue-router'
+import { createWebHashHistory, createRouter } from 'vue-router'
 
 import DefaultLayout from '../layouts/defaultlayout.vue'
 import HeadlessLayout from '../layouts/headlesslayout.vue'
@@ -13,6 +13,7 @@ import register from '../components/register.vue'
 import character from '../components/character.vue'
 import onboarding from '../components/onboarding.vue'
 import chat from '../components/chat.vue'
+import settings from '../components/settings.vue'
 
 const routes = [
   // Страницы без авторизации
@@ -39,12 +40,13 @@ const routes = [
       { path: '/statistics', name: 'Statistics', component: statistics },
       { path: '/character', name: 'Character', component: character },
       { path: '/chat', name: 'Chat', component: chat },
+      { path: '/settings', name: 'Settings', component: settings },
     ],
   },
 ]
 
 const router = createRouter({
-  history: createWebHistory(),
+  history: createWebHashHistory('/life-quest/'),
   routes,
 })
 

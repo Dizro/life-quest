@@ -48,6 +48,7 @@ class User(Base):
 
     # Daily limits (anticheating, FR-5.5)
     daily_xp_earned: Mapped[int] = mapped_column(Integer, default=0)
+    daily_gold_earned: Mapped[int] = mapped_column(Integer, default=0)
     daily_xp_reset_date: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
     # Profile settings

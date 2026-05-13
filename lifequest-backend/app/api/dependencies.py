@@ -9,17 +9,72 @@
 tasks.py и sync.py при этом нужно обновить импорт на: from app.api.dependencies import get_current_user
 """
 
+import logging
+from datetime import datetime, timezone, timedelta
+
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, update
 from jose import JWTError, jwt
 
 from app.core.config import settings
 from app.core.database import get_db
 from app.models.user import User
+from app.models.task import Task
+from app.models.user_buff import UserBuff
 
+logger = logging.getLogger(__name__)
 security = HTTPBearer()
+
+RESURRECTION_ABSENCE_DAYS = 7
+
+
+async def _check_resurrection(user: User, db: AsyncSession) -> None:
+    """
+    Воскрешение (FR-6.6, UC-23) — автоматический серверный триггер.
+    Если пользователь не заходил ≥7 дней:
+      1. Все active + trial задачи → archived (Забытые легенды)
+      2. Стрик → 0 (max_streak сохраняется)
+      3. Бафф ×2.0 XP на 3 дня
+    """
+    if not user.last_active_at:
+        return
+
+    days_absent = (datetime.now(timezone.utc) - user.last_active_at).days
+    if days_absent < RESURRECTION_ABSENCE_DAYS:
+        return
+
+    logger.info("Resurrection triggered for user %s (absent %s days)", user.id, days_absent)
+
+    # 1. Архивируем все active + trial задачи
+    await db.execute(
+        update(Task)
+        .where(
+            Task.user_id == user.id,
+            Task.status.in_(["active", "trial"]),
+        )
+        .values(status="archived")
+    )
+
+    # 2. Стрик сбрасывается, рекорд сохраняется
+    user.streak_days = 0
+
+    # 3. Бафф воскрешения ×2.0 XP на 3 дня
+    now = datetime.now(timezone.utc)
+    buff = UserBuff(
+        user_id=user.id,
+        buff_type="xp_boost",
+        multiplier=2.0,
+        expires_at=now + timedelta(days=3),
+    )
+    db.add(buff)
+
+    # Обновляем множитель на User для быстрого доступа
+    user.xp_multiplier = 2.0
+    user.xp_multiplier_expires = now + timedelta(days=3)
+
+    await db.flush()
 
 
 async def get_current_user(
@@ -28,7 +83,7 @@ async def get_current_user(
 ) -> User:
     """
     Извлекает пользователя из JWT access-токена.
-    Используется во всех защищённых эндпоинтах через Depends(get_current_user).
+    При каждом запросе проверяет условие воскрешения (≥7 дней отсутствия).
     """
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -56,5 +111,12 @@ async def get_current_user(
 
     if user is None or not user.is_active:
         raise credentials_exception
+
+    # Проверка воскрешения (серверный триггер — не кнопка)
+    await _check_resurrection(user, db)
+
+    # Обновляем last_active_at
+    user.last_active_at = datetime.now(timezone.utc)
+    await db.commit()
 
     return user

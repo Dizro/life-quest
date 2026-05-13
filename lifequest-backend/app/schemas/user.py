@@ -29,6 +29,17 @@ class UserUpdate(BaseModel):
     """PATCH /api/v1/users/me — частичное обновление."""
     display_name: Optional[str] = Field(default=None, max_length=100)
     avatar_url: Optional[str] = Field(default=None, max_length=2048)
+    theme: Optional[str] = Field(default=None, pattern="^(dark|light)$")
+    language: Optional[str] = Field(default=None, pattern="^(ru|en)$")
+    notifications_deadlines: Optional[bool] = None
+    notifications_evening: Optional[bool] = None
+    notifications_achievements: Optional[bool] = None
+
+
+class PasswordChange(BaseModel):
+    """POST /api/v1/users/me/password — смена пароля."""
+    current_password: str = Field(..., min_length=1)
+    new_password: str = Field(..., min_length=8, max_length=128)
 
 
 # ── Ответы ────────────────────────────────────────────────────────────────────
@@ -79,6 +90,13 @@ class UserProfile(BaseModel):
     character_class: str
     is_active: bool
     created_at: datetime
+
+    # Настройки
+    theme: str = "dark"
+    language: str = "ru"
+    notifications_deadlines: bool = True
+    notifications_evening: bool = True
+    notifications_achievements: bool = True
 
     # Агрегаты (считаются в роуте)
     quests_completed: int = 0

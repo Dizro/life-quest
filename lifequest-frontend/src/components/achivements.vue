@@ -21,8 +21,9 @@
             <p class="ach-desc">{{ ach.description }}</p>
           </div>
           <div class="ach-reward">
-            <span v-if="ach.unlocked" class="unlocked-badge">✓ Получено</span>
-            <span v-else class="reward-badge">💎 +{{ ach.reward }}</span>
+            <span v-if="ach.unlocked" class="status-label done">✅ Выполнено!</span>
+            <span v-else class="status-label not-done">🔒 Не выполнено</span>
+            <span class="reward-badge">💎 +{{ ach.reward }}</span>
           </div>
         </div>
       </div>
@@ -31,18 +32,55 @@
 </template>
 
 <script>
+import { achievementsApi } from '@/services/api'
+
+const ICON_MAP = {
+  'first_blood': '🗡️',
+  'streak_7': '🔥',
+  'streak_30': '🔥',
+  'level_5': '⭐',
+  'level_10': '⭐',
+  'tasks_10': '⚔️',
+  'tasks_50': '🏹',
+  'tasks_100': '🏹',
+  'shopaholic': '🛍️',
+  'habit_master': '🔄',
+}
+
 export default {
   name: 'AchievementsPage',
   data() {
     return {
-      achievements: [
-        { id: 1, title: 'Первая кровь', description: 'Выполни свою первую задачу.', reward: 5, icon: '🗡️', unlocked: true },
-        { id: 2, title: 'Упорство', description: 'Поддерживай стрик активности 7 дней подряд.', reward: 15, icon: '🔥', unlocked: false },
-        { id: 3, title: 'Авантюрист', description: 'Достигни 5 уровня.', reward: 20, icon: '⭐', unlocked: false },
-        { id: 4, title: 'Шопоголик', description: 'Купи 3 предмета в магазине.', reward: 10, icon: '🛍️', unlocked: false },
-        { id: 5, title: 'Охотник за головами', description: 'Выполни 50 задач с оценкой сложности 5 и выше.', reward: 50, icon: '🏹', unlocked: false },
-        { id: 6, title: 'Мастер привычек', description: 'Отметь привычку 100 раз.', reward: 30, icon: '🔄', unlocked: false },
-      ]
+      achievements: []
+    }
+  },
+  async created() {
+    await this.loadAchievements()
+  },
+  methods: {
+    async loadAchievements() {
+      try {
+        const data = await achievementsApi.getAll()
+        this.achievements = (data.achievements || data || []).map(a => ({
+          id: a.id,
+          title: a.title || a.name,
+          description: a.description,
+          reward: a.crystal_reward || a.reward || 5,
+          icon: ICON_MAP[a.key] || '🏅',
+          unlocked: a.unlocked || false,
+        }))
+      } catch (err) {
+        console.error('Achievements load error:', err)
+        // Fallback to static list
+        this.achievements = [
+          { id: 1, title: 'Первая кровь', description: 'Выполни свою первую задачу.', reward: 5, icon: '🗡️', unlocked: false },
+          { id: 2, title: 'Упорство', description: 'Поддерживай стрик активности 7 дней подряд.', reward: 15, icon: '🔥', unlocked: false },
+          { id: 3, title: 'Авантюрист', description: 'Достигни 5 уровня.', reward: 20, icon: '⭐', unlocked: false },
+          { id: 4, title: 'Шопоголик', description: 'Купи 3 предмета в магазине.', reward: 10, icon: '🛍️', unlocked: false },
+          { id: 5, title: 'Охотник за головами', description: 'Выполни 50 задач с оценкой сложности 5 и выше.', reward: 50, icon: '🏹', unlocked: false },
+          { id: 6, title: 'Мастер привычек', description: 'Отметь привычку 100 раз.', reward: 30, icon: '🔄', unlocked: false },
+        ]
+      }
     }
   }
 }
@@ -159,8 +197,20 @@ export default {
   padding-top: 16px;
   border-top: 1px solid #f0ebff;
   display: flex;
-  justify-content: flex-end;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
 }
+
+.status-label {
+  font-family: 'Varela Round', sans-serif;
+  font-size: 13px;
+  font-weight: 700;
+  padding: 5px 12px;
+  border-radius: 10px;
+}
+.status-label.done { background: #c6f6d5; color: #22543d; }
+.status-label.not-done { background: #f0ebff; color: #718096; }
 
 .reward-badge {
   font-family: 'Varela Round', sans-serif;
@@ -172,13 +222,22 @@ export default {
   border-radius: 12px;
 }
 
-.unlocked-badge {
-  font-family: 'Varela Round', sans-serif;
-  font-size: 14px;
-  font-weight: 700;
-  color: #38a169;
-  background: #f0fff4;
-  padding: 6px 12px;
-  border-radius: 12px;
+/* ─── Адаптив ─── */
+@media (max-width: 768px) {
+  .achievements-page { padding: 24px 16px; }
+  .page-title { font-size: 28px; }
+  .achievements-grid { grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 14px; }
+}
+
+@media (max-width: 480px) {
+  .achievements-page { padding: 16px 12px; }
+  .page-title { font-size: 24px; }
+  .page-subtitle { font-size: 13px; }
+  .achievements-grid { grid-template-columns: 1fr; gap: 12px; }
+  .achievement-card { padding: 14px; border-radius: 14px; gap: 12px; }
+  .ach-icon-wrapper { width: 48px; height: 48px; border-radius: 12px; }
+  .ach-icon { font-size: 26px; }
+  .ach-title { font-size: 16px; }
+  .ach-desc { font-size: 13px; }
 }
 </style>

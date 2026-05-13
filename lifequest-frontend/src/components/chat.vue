@@ -4,6 +4,7 @@
       <header class="page-header">
         <h1 class="page-title">Наставник Фаррикс</h1>
         <p class="page-subtitle">Получи совет, настройся на работу или просто поболтай.</p>
+        <button class="clear-chat-btn" @click="clearChat">🗑️ Очистить чат</button>
       </header>
 
       <div class="chat-container">
@@ -61,7 +62,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, nextTick } from 'vue'
+import { ref, watch, onMounted, nextTick } from 'vue'
 import { chatApi } from '@/services/api'
 import { useAuthStore } from '@/stores/auth'
 
@@ -71,13 +72,34 @@ const isChatTyping = ref(false)
 const chatInput = ref('')
 const chatScroll = ref(null)
 
-// Начальное приветствие
-const chatHistory = ref([
-  { 
-    role: 'assistant', 
-    content: `Приветствую, ${authStore.displayName || 'Герой'}! Я Фаррикс — твой ИИ-наставник. Я здесь, чтобы помочь тебе распланировать день, оценить сложность твоих задач или просто поддержать в трудную минуту. О чем поговорим?` 
-  }
-])
+const CHAT_STORAGE_KEY = 'lq_chat_history'
+
+// Загрузка из localStorage или приветствие по умолчанию
+function loadHistory() {
+  try {
+    const saved = localStorage.getItem(CHAT_STORAGE_KEY)
+    if (saved) {
+      const parsed = JSON.parse(saved)
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed
+    }
+  } catch {}
+  return [
+    { 
+      role: 'assistant', 
+      content: `Приветствую, ${authStore.displayName || 'Герой'}! Я Фаррикс — твой ИИ-наставник. Я здесь, чтобы помочь тебе распланировать день, оценить сложность твоих задач или просто поддержать в трудную минуту. О чем поговорим?` 
+    }
+  ]
+}
+
+const chatHistory = ref(loadHistory())
+
+// Сохраняем при каждом изменении (последние 50 сообщений)
+watch(chatHistory, (val) => {
+  try {
+    const toSave = val.slice(-50)
+    localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(toSave))
+  } catch {}
+}, { deep: true })
 
 const scrollToBottom = () => {
   nextTick(() => {
@@ -97,7 +119,6 @@ const sendChatMessage = async () => {
   scrollToBottom()
 
   try {
-    // Отправляем историю (исключая текущее сообщение пользователя, чтобы бекенд получил его отдельно)
     const historyToSend = chatHistory.value.slice(0, -1).map(m => ({role: m.role, content: m.content}))
     const res = await chatApi.send(userText, historyToSend)
     
@@ -113,10 +134,28 @@ const sendChatMessage = async () => {
   }
 }
 
+const clearChat = () => {
+  const greeting = {
+    role: 'assistant',
+    content: `Приветствую, ${authStore.displayName || 'Герой'}! Я Фаррикс — твой ИИ-наставник. О чем поговорим?`
+  }
+  chatHistory.value = [greeting]
+  localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify([greeting]))
+}
+
+// Позволяет другим компонентам добавлять сообщения Фаррикса через window event
+window.addEventListener('farrix-message', (e) => {
+  if (e.detail?.content) {
+    chatHistory.value.push({ role: 'assistant', content: e.detail.content })
+    scrollToBottom()
+  }
+})
+
 onMounted(async () => {
   if (!authStore.user) {
     await authStore.fetchProfile()
   }
+  scrollToBottom()
 })
 </script>
 
@@ -136,7 +175,21 @@ onMounted(async () => {
   height: calc(100vh - 131px); /* Чтобы чат не выходил за пределы экрана */
 }
 
-.page-header { text-align: center; flex-shrink: 0; }
+.page-header { text-align: center; flex-shrink: 0; position: relative; }
+.clear-chat-btn {
+  margin-top: 10px;
+  padding: 8px 18px;
+  border-radius: 12px;
+  border: 2px solid #e2d6ff;
+  background: #faf8ff;
+  color: #5a4a7a;
+  font-family: 'Varela Round', sans-serif;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.clear-chat-btn:hover { background: #fed7d7; border-color: #fc8181; color: #c53030; }
 .page-title { font-family: 'Varela Round', sans-serif; font-size: 36px; font-weight: 700; color: #2a1a5e; margin-bottom: 8px; }
 .page-subtitle { font-family: 'Varela Round', sans-serif; font-size: 16px; color: #5a4a7a; }
 
@@ -289,5 +342,33 @@ onMounted(async () => {
 @keyframes typing {
   0%, 100% { transform: translateY(0); }
   50% { transform: translateY(-5px); }
+}
+
+/* ─── Адаптив ─── */
+@media (max-width: 768px) {
+  .page-wrapper { padding: 16px 12px; }
+  .page-title { font-size: 28px; }
+  .chat-page { height: calc(100vh - 110px); gap: 16px; }
+  .chat-messages { padding: 16px; gap: 14px; }
+  .message-wrapper { max-width: 92%; }
+  .chat-input-area { padding: 12px 14px; gap: 8px; }
+  .chat-input { padding: 12px 16px; font-size: 14px; }
+  .send-btn { width: 46px; height: 46px; font-size: 18px; }
+}
+
+@media (max-width: 480px) {
+  .page-wrapper { padding: 10px 8px; }
+  .page-title { font-size: 22px; }
+  .page-subtitle { font-size: 13px; }
+  .chat-page { height: calc(100vh - 95px); gap: 10px; }
+  .chat-container { border-radius: 14px; }
+  .chat-messages { padding: 12px; gap: 10px; }
+  .message-wrapper { max-width: 95%; gap: 8px; }
+  .avatar-circle { width: 32px; height: 32px; font-size: 16px; }
+  .message-bubble { padding: 10px 14px; border-radius: 16px; }
+  .message-text { font-size: 14px; }
+  .chat-input-area { padding: 10px 12px; }
+  .chat-input { padding: 10px 14px; font-size: 13px; border-radius: 20px; }
+  .send-btn { width: 42px; height: 42px; font-size: 16px; }
 }
 </style>

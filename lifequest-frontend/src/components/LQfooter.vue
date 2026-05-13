@@ -32,7 +32,7 @@
 
 .mountains-container {
   width: 100%;
-  background-color: transparent; /* Changed from #36205d to match */
+  background-color: #D4B7FF;
   line-height: 0; 
 }
 
