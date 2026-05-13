@@ -7,6 +7,8 @@ build/
 .eggs/
 *.egg
 .env
+!.env.production
+!.env.production.bak
 .venv/
 venv/
 env/
