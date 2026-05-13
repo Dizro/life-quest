@@ -29,6 +29,7 @@ logger = logging.getLogger("seed")
 # ── каталог достижений ────────────────────────────────────────────────────────
 
 INITIAL_ACHIEVEMENTS = [
+    # Существующие
     {
         "code": "first_quest_completed",
         "title": "Первая стезя",
@@ -63,6 +64,76 @@ INITIAL_ACHIEVEMENTS = [
         "description": "Успешно завершите испытание.",
         "icon_url": "🛡️",
         "xp_bonus": 25,
+    },
+    {
+        "code": "streak_30_days",
+        "title": "Легендарная стойкость",
+        "description": "Выполняйте квесты 30 дней подряд.",
+        "icon_url": "🏆",
+        "xp_bonus": 200,
+    },
+    {
+        "code": "quests_10_completed",
+        "title": "Начинающий герой",
+        "description": "Выполните 10 квестов.",
+        "icon_url": "📜",
+        "xp_bonus": 30,
+    },
+    {
+        "code": "quests_100_completed",
+        "title": "Ветеран",
+        "description": "Выполните 100 квестов.",
+        "icon_url": "📜",
+        "xp_bonus": 150,
+    },
+    {
+        "code": "quests_1000_completed",
+        "title": "Легенда",
+        "description": "Выполните 1000 квестов.",
+        "icon_url": "📜",
+        "xp_bonus": 500,
+    },
+    {
+        "code": "gold_1000_earned",
+        "title": "Богач",
+        "description": "Накопите 1000 монет (суммарно заработано, не потрачено).",
+        "icon_url": "💰",
+        "xp_bonus": 50,
+    },
+    {
+        "code": "crystals_50_earned",
+        "title": "Кристаллоносный",
+        "description": "Накопите 50 кристаллов.",
+        "icon_url": "💎",
+        "xp_bonus": 100,
+    },
+    {
+        "code": "first_purchase",
+        "title": "Первый покупатель",
+        "description": "Совершите первую покупку в магазине.",
+        "icon_url": "🛒",
+        "xp_bonus": 20,
+    },
+    {
+        "code": "epic_gold_spent",
+        "title": "Транжира",
+        "description": "Потратьте в общей сложности 500 монет в магазине.",
+        "icon_url": "💸",
+        "xp_bonus": 60,
+    },
+    {
+        "code": "all_subtasks_complete",
+        "title": "Педант",
+        "description": "Завершите родительскую задачу, закрыв все её подзадачи.",
+        "icon_url": "📋",
+        "xp_bonus": 40,
+    },
+    {
+        "code": "redeem_3_trials",
+        "title": "Искупитель",
+        "description": "Выкупите 3 испытания за монеты.",
+        "icon_url": "🔁",
+        "xp_bonus": 35,
     },
 ]
 
