@@ -10,7 +10,8 @@ from app.models.task import Task
 from app.schemas.task import TaskCreate, TaskUpdate, TaskResponse, TaskCompleteResponse
 from app.services.reward_service import calculate_rewards, apply_xp, get_farrix_phrase
 from app.services.achievement_service import check_and_unlock_achievements
-from app.tasks.celery_tasks import process_effort_score
+from app.services.ai_service import get_effort_score
+from app.core.config import settings
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
@@ -44,8 +45,26 @@ async def create_task(
     db.add(task)
     await db.flush()  # Получаем id
 
-    # Запускаем Celery-задачу для оценки сложности
-    process_effort_score.delay(task.id)
+    # Синхронная ИИ-оценка сложности (убрали Celery для Render Free tier)
+    try:
+        ai_response = await get_effort_score(task.title)
+        es = ai_response.effort_score
+        task.effort_score = es.value
+        task.effort_confidence = es.confidence
+        task.effort_reasoning = es.reasoning
+        task.complexity_level = es.complexity_level.value
+        task.status = "active"
+        xp, gold = calculate_rewards(es.value, task.task_type)
+        task.xp_reward = xp
+        task.gold_reward = gold
+    except Exception:
+        task.status = "active"
+        task.effort_score = settings.AI_DEFAULT_EFFORT_SCORE
+        task.complexity_level = settings.AI_DEFAULT_COMPLEXITY
+        task.effort_reasoning = settings.AI_DEFAULT_REASONING
+        xp, gold = calculate_rewards(task.effort_score, task.task_type)
+        task.xp_reward = xp
+        task.gold_reward = gold
 
     await db.commit()
     await db.refresh(task)
