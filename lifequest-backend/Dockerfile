@@ -17,4 +17,4 @@ RUN pip install --no-cache-dir --upgrade pip \
 
 COPY . .
 
-CMD sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"
+CMD sh -c "python ensure_columns.py; alembic upgrade head; uvicorn app.main:app --host 0.0.0.0 --port 8000"
